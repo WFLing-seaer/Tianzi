@@ -1,0 +1,12 @@
+__pycache__/
+*.py[codz]
+*.nb[ci]
+.vscode/
+legacy/
+lexicons/
+*.md
+!README.md
+!LICENSE
+!lexloader/lexicons
+lexloader/lexicons/*
+!lexloader/lexicons/.gitkeep
