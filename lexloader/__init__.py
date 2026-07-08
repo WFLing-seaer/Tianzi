@@ -84,10 +84,12 @@ class Lexicon:
             ) if self.schemas.schemas else ""}"
 
     def query(self, qstr: str = "", colname: str | None = None):
-        return self.schemas.get_col(colname).data[self.schemas.query_pop(qstr)]
+        col = self.schemas.get_col(colname)
+        return col.tostr(col.data[self.schemas.query_pop(qstr)])
 
     def __getitem__(self, key: slice[str, int, None]):
-        return self.schemas.get_col(key.start).data[key.stop]
+        col = self.schemas.get_col(key.start)
+        return col.tostr(col.data[key.stop])
 
 
 async def query(lexname: str, qstr: str = "", colname: str | None = None):

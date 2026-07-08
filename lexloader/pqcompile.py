@@ -3,6 +3,7 @@ import re
 import sys
 import typing
 from collections.abc import Callable, Iterable
+from itertools import chain
 from pathlib import Path
 
 import awkward as ak
@@ -48,7 +49,7 @@ def _cvrt_Pinyin(raw_values: list[str]) -> ak.Array:
     parsed: list[list[int]] = []
     for val in tqdm(raw_values):
         if val.strip():
-            syls = pinyin_parse(val)
+            syls = pinyin_parse(val, default_tone_neutral=True, force_valid_syllable=True, missing_as_nul=True)
             parsed.append([int(s) for s in syls])
         else:
             parsed.append([])
@@ -106,19 +107,22 @@ def compile_dsv(lines: Iterable[str], delim: str = ",") -> ak.Array:
     scol0_name: str | None = None
     sorted_keys: list[str] = []
 
-    for header in headers:
+    for header, rawheader in chain(
+        ((header[1:], header) for header in headers if header.startswith("*")),
+        ((header, header) for header in headers if not header.startswith("*")),
+    ):
         compiling_heads = compile_parse(header)
         main_str, aot_strs = compile_get_parts(header)
         main_proto_cls = PROTO_NAMES.get(compiling_heads.main.proto.upper())
         if main_proto_cls is None:
-            raise ValueError(f"未知的协议类型: {compiling_heads.main.proto} @ col:'{header}'")
+            raise ValueError(f"未知的协议类型: {compiling_heads.main.proto} @ col:'{rawheader}'")
 
         if issubclass(main_proto_cls, SortedColABC):
             sorted_keys.append(main_str)
             if scol0_name is None:
                 scol0_name = main_str
 
-        main_arr = convert_raw(main_proto_cls, raw_data[header])
+        main_arr = convert_raw(main_proto_cls, raw_data[rawheader])
         result_arrs[main_str] = typing.cast(AwkwardLike, main_arr)
 
         if not compiling_heads.aot:

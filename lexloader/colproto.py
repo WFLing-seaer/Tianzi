@@ -2,15 +2,15 @@ import itertools
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Callable
-from itertools import count
+from collections.abc import Callable, Iterable
+from itertools import count, repeat
 from typing import Any, cast
 
 import awkward as ak
 import numba
 import numpy as np
 from awkward.operations import str as akstr
-from pinyinparser import Final, Initial, Syllable, Tone
+from pinyinparser import Final, Initial, Syllable, Tone, syllables_to_str
 
 if __package__:
     from .typing_utils import ArrayLike, AwkwardLike, asArrayLike, asAwkwardLike
@@ -56,6 +56,10 @@ class ColProtoABC[T](ABC):
 
     def find(self, item: T) -> ArrayLike:
         return self.data == item
+
+    @staticmethod
+    def tostr(val: T) -> str:
+        return str(val)
 
     data: AwkwardLike
 
@@ -518,6 +522,10 @@ class Float64(_Float):
 
 
 class _Complex(ColProtoABC[complex]):
+    @staticmethod
+    def tostr(val: complex) -> str:
+        return f"{val.real}+{val.imag}i"
+
     def query(self, method: str, target: complex) -> AwkwardLike:
         match method:
             case "eq":
@@ -540,6 +548,10 @@ class Complex128(_Complex):
 
 
 class Pinyin(ColProtoABC[list[int]]):
+    @staticmethod
+    def tostr(val: list[int]) -> str:
+        return syllables_to_str((Syllable(int(v)) for v in val), "'")
+
     @staticmethod
     def from_python(raw: list[list[int]]) -> ak.Array:
         data = asAwkwardLike(ak.values_astype(ak.Array(raw), "uint16"))
@@ -647,26 +659,32 @@ class Pinyin(ColProtoABC[list[int]]):
     ):
         __p_check(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x)
 
-    def query(self, m: int | None, n: int | None, iw: bool, fw: bool, s: list[Syllable]) -> ArrayLike:
+    def query(self, m: int | None, n: int | None, iw: Iterable[bool] | bool, fw: Iterable[bool] | bool, s: Iterable[Syllable]) -> ArrayLike:
         print(f"m={repr(m)}, n={repr(n)}, iw={repr(iw)}, fw={repr(fw)}, s={repr(s)}")
         offset: ArrayLike = self.data.layout.offsets.data
         data: ArrayLike = self.data.layout.content.data
 
         and_lst: list[np.uint16] = []
         xor_lst: list[np.uint16] = []
-        for syll in s:
+
+        iw = repeat(iw) if isinstance(iw, bool) else iw
+        fw = repeat(fw) if isinstance(fw, bool) else fw
+
+        for syll, iwp, fwp in zip(s, iw, fw):
             and_val = 0
             xor_val = int(syll)
 
             if syll.initial not in (Initial.missing, Initial.unspec):
-                and_val |= 0x001F if iw else 0x801F
+                and_val |= 0x001F if iwp else 0x801F
             if syll.final not in (Final.missing, Final.unspec):
-                and_val |= 0x1F00 if fw else 0x7F00
+                and_val |= 0x1F00 if fwp else 0x7F00
             if syll.tone not in (Tone.missing, Tone.unspec):
                 and_val |= 0x00E0
 
             and_lst.append(np.uint16(and_val))
             xor_lst.append(np.uint16(xor_val))
+
+        print(f"{and_lst=} {xor_lst=}")
 
         and_np = np.array(and_lst, dtype=np.uint16)
         xand_np = np.array(xor_lst, dtype=np.uint16) & and_np
