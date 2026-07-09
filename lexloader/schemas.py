@@ -430,3 +430,26 @@ class SPath(SchemaABC):
             if current_node_id == -1:
                 return False
         return self.cols.parent.query("eq", current_node_id)
+
+
+@schema
+class SPos(SchemaABC):
+
+    class required_cols(NamedTuple):
+        word: PlainText
+
+    cols: required_cols
+
+    query_re_pat = re.compile("#(?P<start>[0-9]+)?\\.\\.(?P<stop>[0-9]+)?")
+
+    def _query(self, mch):
+        _start = mch.group("start")
+        _stop = mch.group("stop")
+
+        start = int(_start) if _start else None
+        stop = int(_stop) if _stop else None
+
+        ret = np.zeros(len(self.cols.word.data), dtype=np.bool_)
+        ret[start:stop] = True
+
+        return ret
