@@ -880,7 +880,7 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     font_name: str = await self.stegroup(mch, "font")
 
-    font: dict[int, int] | dict[int | str, int | str] | dict[str, str] | None = fonts.fuzzy(font_name.lower(), threshold=60)
+    font: dict[int, int] | dict[int | str, int | str] | dict[str, str] | None = fonts.get(font_name.lower(), None)
     if font is None:
         raise PosteriorReject(mch, "[E61字体无效]", f"{{d}} - 「{font_name}」不是有效的字体名称，也无法被模糊匹配到有效的字体名称。(E61)")
 
