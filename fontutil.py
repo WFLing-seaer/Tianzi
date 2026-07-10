@@ -315,7 +315,7 @@ MIRROR = str.maketrans("()[]{}<>bdpq/", ")(][}{><dbqp\\")
 fonts: Names[dict[int, int] | dict[int | str, int | str] | dict[str, str]] = Names()
 fonts.name(SUPERSCRIPTS, "上标", "sup")
 fonts.name(SUBSCRIPTS, "下标", "sub")
-fonts.name(BOLD, "粗体", "黑体", "bold", "b", "衬线粗体", "衬线粗体字符", "衬线粗体字母", "serifbold", "sb")
+fonts.name(BOLD, "粗体", "黑体", "bold", "衬线粗体", "衬线粗体字符", "衬线粗体字母", "serifbold")
 fonts.name(DOUBLE_STRUCK, "双线", "双线体", "doublestruck")
 fonts.name(FRAKTUR, "fraktur", "fraktur体", "粗哥特体", "哥特粗体", "德文黑体", "花体", "粗黑板粗体")
 fonts.name(
@@ -324,7 +324,6 @@ fonts.name(
     "意大利体",
     "意大利斜体",
     "italic",
-    "i",
     "衬线粗斜体",
     "衬线粗斜体字符",
     "衬线粗斜体字母",
@@ -332,17 +331,15 @@ fonts.name(
     "衬线意大利粗体",
     "serifbolditalic",
     "serifitalicbold",
-    "sbi",
-    "sib",
 )
-fonts.name(SQUARED, "方框", "带框字母", "带框字符", "sq", "square", "squared", "box", "boxed")
+fonts.name(SQUARED, "方框", "带框字母", "带框字符", "square", "squared", "box", "boxed")
 fonts.name(NEGATIVE_SQUARED, "黑底方框", "黑底带框字母", "黑底带框字符", "反白", "nsq", "negsquare", "negsquared", "negbox", "negboxed")
 fonts.name(CIRCLED, "圆圈", "带圈字母", "带圈字符", "circle", "circ", "circled")
 fonts.name(NEGATIVE_CIRCLED, "黑底圆圈", "黑底带圈字母", "黑底带圈字符", "反白圆圈", "ncirc", "negcircle", "negcircled")
-fonts.name(BLACKBOARD_BOLD, "黑板粗体", "bb", "blackboard", "哥特体", "mathbb")
+fonts.name(BLACKBOARD_BOLD, "黑板粗体", "blackboard", "哥特体", "mathbb")
 fonts.name(SCRIPT, "草书", "草书体", "手写", "手写体", "脚本", "script")
 fonts.name(SCRIPT_BOLD, "粗草书", "粗草书体", "草书粗体", "粗手写", "粗手写体", "手写粗体", "粗脚本", "scriptbold")
-fonts.name(SANS_SERIF_BOLD, "无衬线粗体", "ssbold", "ssb")
+fonts.name(SANS_SERIF_BOLD, "无衬线粗体", "ssbold")
 fonts.name(
     SANS_SERIF_BOLD_ITALIC,
     "无衬线粗斜体",
@@ -354,10 +351,8 @@ fonts.name(
     "ssitalicbold",
     "ssbitalic",
     "ssibold",
-    "ssbi",
-    "ssib",
 )
-fonts.name(SANS_SERIF_ITALIC, "无衬线斜体", "无衬线意大利体", "ssitalic", "ssi")
+fonts.name(SANS_SERIF_ITALIC, "无衬线斜体", "无衬线意大利体", "ssitalic")
 fonts.name(
     FULLWIDTH_FORMS,
     "全角",
@@ -368,13 +363,11 @@ fonts.name(
     "全形",
     "全形字母",
     "全形字符",
-    "fw",
-    "fs",
     "full",
     "fullwidth",
     "fullshape",
 )
-fonts.name(PARENTHESIZED, "括号", "带括号字母", "带括号字符", "par", "parenthesized")
+fonts.name(PARENTHESIZED, "括号", "带括号字母", "带括号字符", "paren", "parenthesized")
 fonts.name(
     MONOSPACE,
     "等宽",
@@ -392,37 +385,35 @@ fonts.name(
     "衬线形式字母",
     "serif",
 )
-fonts.name(SANS_SERIF, "无衬线", "无衬线字符", "无衬线形式", "无衬线形式字符", "无衬线形式字母", "ss", "sansserif")
-fonts.name(REGION_INDICATOR, "区域指示符", "区域指示符字符", "区域指示符字母", "旗帜符号", "旗帜", "国旗", "reg", "flag", "region")
-fonts.name(SMALL_CAPS, "小大写字母", "小大写", "sc", "smallcaps")
+fonts.name(SANS_SERIF, "无衬线", "无衬线字符", "无衬线形式", "无衬线形式字符", "无衬线形式字母", "sansserif")
+fonts.name(REGION_INDICATOR, "区域指示符", "区域指示符字符", "区域指示符字母", "旗帜符号", "旗帜", "国旗", "flag", "region")
+fonts.name(SMALL_CAPS, "小大写字母", "小大写", "smallcaps")
 fonts.name(HORIZONTAL_BAR, "水平条", "横条", "水平进度条", "hbar")
 fonts.name(VERTICAL_BAR, "垂直条", "竖条", "垂直进度条", "vbar")
 fonts.name(ROMAN, "罗马数字", "罗马数字字符", "罗马数字字母", "roman")
 fonts.name(SMALL, "小型", "小型字符", "小型字母", "小型数字", "small")
-fonts.name(OUTLINED, "轮廓", "空心", "外框", "空心字符", "外框字符", "空心字母", "外框字母", "outlined", "ol")
-fonts.name(SEGMENTED, "七段", "七段字符", "七段数字", "数码管", "segmented", "seg")
-fonts.name(
-    SERIF_ITALIC, "衬线斜体", "衬线斜体字符", "衬线斜体字母", "衬线意大利体", "衬线意大利体字符", "衬线意大利体字母", "serifitalic", "si"
-)
-fonts.name(CURRENCY_SIGN, "货币符号", "货币符号字符", "货币符号字母", "货币", "currency", "cs", "cur")
-fonts.name(UPSIDE_DOWN, "倒置", "倒转", "颠倒", "颠倒字符", "颠倒字母", "颠倒数字", "颠倒符号", "ud", "upsidedown", "翻转")
-fonts.name(PERIOD, "圆点", "圆点数字", "句点", "带点数字", "period", "dot", "dots")
-fonts.name(DOUBLE_CIRCLE, "双圆圈", "双圆圈数字", "双圈", "双圈数字", "doublecircle", "doublecirc", "dcirc", "2circ")
-fonts.name(QUATERS, "象限", "四象限", "quarters", "quart")
+fonts.name(OUTLINED, "轮廓", "空心", "外框", "空心字符", "外框字符", "空心字母", "外框字母", "outlined")
+fonts.name(SEGMENTED, "七段", "七段字符", "七段数字", "数码管", "segmented")
+fonts.name(SERIF_ITALIC, "衬线斜体", "衬线斜体字符", "衬线斜体字母", "衬线意大利体", "衬线意大利体字符", "衬线意大利体字母", "serifitalic")
+fonts.name(CURRENCY_SIGN, "货币符号", "货币符号字符", "货币符号字母", "货币", "currency")
+fonts.name(UPSIDE_DOWN, "倒置", "倒转", "颠倒", "颠倒字符", "颠倒字母", "颠倒数字", "颠倒符号", "upsidedown", "翻转")
+fonts.name(PERIOD, "圆点", "圆点数字", "句点", "带点数字", "period", "dotted")
+fonts.name(DOUBLE_CIRCLE, "双圆圈", "双圆圈数字", "双圈", "双圈数字", "doublecircle", "doublecirc", "2circ")
+fonts.name(QUATERS, "象限", "四象限", "quarters", "quarter")
 fonts.name(CHESS, "国象", "国际象棋", "chess")
 fonts.name(POKER, "扑克", "扑克牌", "poker")
 fonts.name(PLASTIC, "塑料", "塑料标号", "回收", "回收标号", "recycle", "plastic")
 fonts.name(DIE, "骰子", "色子", "die", "dice")
 fonts.name(DINGBAT, "筹码", "dingbat")  # 注: dingbat此处并不应当译为“筹码”，但是出于区分度等考虑，保留“筹码”的译法。
-fonts.name(DINGBAT_NEG, "反白筹码", "negdingbat")
-fonts.name(DINGBAT_NEG_SANSSERIF, "反白无衬线筹码", "无衬线筹码", "negdingbatss")
+fonts.name(DINGBAT_NEG, "反白筹码", "反白dingbat", "negdingbat")
+fonts.name(DINGBAT_NEG_SANSSERIF, "反白无衬线筹码", "无衬线筹码", "反白无衬线dingbat", "无衬线dingbat", "negdingbatss")
 fonts.name(IDC, "表意文字描述符", "idc")
-fonts.name(SUZHOU, "苏州码子", "sz", "suzhou")
+fonts.name(SUZHOU, "苏州码子", "suzhou")
 fonts.name(COBS, "黑方块白圆圈", "黑底白圆圈", "方圆", "circleonblacksquare", "circleonnegsquare", "circonnegsq")
 fonts.name(MONTH, "月", "月份", "month")
 fonts.name(DAY, "日", "日期", "天", "day")
 fonts.name(HOUR, "时", "小时", "hour")
-fonts.name(YI, "易", "易经", "卦", "六十四卦", "yijing", "yi")
+fonts.name(YI, "易", "易经", "卦", "六十四卦")
 fonts.name(MIRROR, "镜像", "对称", "对称字符", "对称字母", "对称数字", "对称符号", "mirror", "symmetry")
 
 RESERVED_BRAILLE = "⠀⠁⠂⠃⠄⠅⠆⠇⠈⠉⠊⠋⠌⠍⠎⠏⠐⠑⠒⠓⠔⠕⠖⠗⠘⠙⠚⠛⠜⠝⠞⠟⠠⠡⠢⠣⠤⠥⠦⠧⠨⠩⠪⠫⠬⠭⠮⠯⠰⠱⠲⠳⠴⠵⠶⠷⠸⠹⠺⠻⠼⠽⠾⠿⡀⡁⡂⡃⡄⡅⡆⡇⡈⡉⡊⡋⡌⡍⡎⡏⡐⡑⡒⡓⡔⡕⡖⡗⡘⡙⡚⡛⡜⡝⡞⡟⡠⡡⡢⡣⡤⡥⡦⡧⡨⡩⡪⡫⡬⡭⡮⡯⡰⡱⡲⡳⡴⡵⡶⡷⡸⡹⡺⡻⡼⡽⡾⡿⢀⢁⢂⢃⢄⢅⢆⢇⢈⢉⢊⢋⢌⢍⢎⢏⢐⢑⢒⢓⢔⢕⢖⢗⢘⢙⢚⢛⢜⢝⢞⢟⢠⢡⢢⢣⢤⢥⢦⢧⢨⢩⢪⢫⢬⢭⢮⢯⢰⢱⢲⢳⢴⢵⢶⢷⢸⢹⢺⢻⢼⢽⢾⢿⣀⣁⣂⣃⣄⣅⣆⣇⣈⣉⣊⣋⣌⣍⣎⣏⣐⣑⣒⣓⣔⣕⣖⣗⣘⣙⣚⣛⣜⣝⣞⣟⣠⣡⣢⣣⣤⣥⣦⣧⣨⣩⣪⣫⣬⣭⣮⣯⣰⣱⣲⣳⣴⣵⣶⣷⣸⣹⣺⣻⣼⣽⣾⣿"  # 尚未决定应当将这些字符映射到哪些字符，因此保留备用。
