@@ -327,7 +327,7 @@ class Tianzi:
     # 目前已占用的PUA: 0xE000-0xE07F(ASCII转义) 0xE104-0xE500(嵌套指令打包)
     async def translate(self, text: str, final: bool = False) -> SupportsStr:
         if len(text) > 65535:
-            raise BreakOut("[E31] 尝试转换的文本过长。输入不得大于65535字符")
+            raise BreakOut("[E60.1] 尝试转换的文本过长。输入不得大于65535字符")
 
         if self.current_stat.allow_pua_warning:
             self.current_stat.pua_warning |= bool(regex.search("[\ue000-\ue07f\ue104-\ue500]", text))
@@ -370,7 +370,7 @@ class Tianzi:
             if sfield.startswith(SYN_STRICTMODE):
                 cmd_content = sfield[len(SYN_STRICTMODE) :].lstrip()
                 if not cmd_content:
-                    raise BreakOut("[E98.1] 严式语法必须显式指定翻译器。")
+                    raise BreakOut("[E30.1] 严式语法必须显式指定翻译器。")
                 parts = cmd_content.split()
                 cmd_name = parts[0]
                 rem_args = parts[1:]
@@ -381,7 +381,7 @@ class Tianzi:
                         target_func = func
                         break
                 else:
-                    raise BreakOut(f"[E98.2] 未知的翻译器「{cmd_name}」")
+                    raise BreakOut(f"[E70.1] 未知的翻译器「{cmd_name}」")
 
                 pargs = {}
                 for arg in rem_args:
@@ -389,13 +389,13 @@ class Tianzi:
                         continue
                     kv = arg.split("=", 1)
                     if len(kv) <= 1:
-                        raise BreakOut("[E98.3] 严式语法必须使用k=v键值对形式显式指定正则字段")
+                        raise BreakOut("[E30.2] 严式语法必须使用k=v键值对形式显式指定正则字段")
                     k, v = kv
                     pargs[k] = v
 
                 for k in pargs:
                     if k not in target_pat.groupindex:
-                        raise BreakOut(f"[E98.4] {k}不是翻译器{cmd_name}的有效正则字段")
+                        raise BreakOut(f"[E70.2] {k}不是翻译器{cmd_name}的有效正则字段")
                 ogd = {name: pargs.get(name) for name in target_pat.groupindex}
 
                 mock_mch = DuckMatch(ogd)
@@ -410,7 +410,7 @@ class Tianzi:
                     else:
                         self.call_stack.append(f"]({fun_t_us:.1f}μs); ")
                 except PosteriorReject:
-                    raise BreakOut(f"[E98.5] 严式语法下产生的后验拒绝：{cmd_name}<->{ogd}")
+                    raise BreakOut(f"[E70.3] 严式语法下产生的后验拒绝：{cmd_name}<->{ogd}")
                 fields[i] = field
                 self.nested_inline_epacse = NIEPACSE_backup
                 continue
@@ -491,8 +491,8 @@ class Tianzi:
         if cn and "_" in cn and not self.current_stat.allow_underscore_in_cache_name:
             return partial(
                 self.breakout,
-                abbr="[E32缓存名无效]",
-                msg="{d} - 缓存名中不允许出现下划线，因其可能导致意外的后果。如果一定要使用下划线，请使用[[config<enable_cache_name_with_underscore>]]。 (E32)",
+                abbr="[E61缓存名无效]",
+                msg="{d} - 缓存名中不允许出现下划线，因其可能导致意外的后果。如果一定要使用下划线，请使用[[config<enable_cache_name_with_underscore>]]。 (E61)",
             )
 
     def group(self, mch: SupportsGroup, group: str | int) -> str:
@@ -538,16 +538,16 @@ async def Nocensor(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if not otp:
         return self.breakout(
             mch,
-            "[E21.3验证码缺失]",
-            f"{{d}} - 需要验证码才能执行此操作。当前验证码为【{(val_otp:=set_new_otp())}】。请使用[[nocensor {val_otp}]]。 (E21.3)\n警告：使用此指令造成的一切后果由调用者承担，本机不负任何责任！",
+            "[E72.1验证码缺失]",
+            f"{{d}} - 需要验证码才能执行此操作。当前验证码为【{(val_otp:=set_new_otp())}】。请使用[[nocensor {val_otp}]]。 (E72.1)\n警告：使用此指令造成的一切后果由调用者承担，本机不负任何责任！",
         )
     if (chk := check_otp(otp)) == 0:
         self.current_stat.censor = False
         return ""
     elif chk == 1:
-        return self.breakout(mch, "[E21.1验证码过期]", f"{{d}} - 此验证码已过期。当前验证码为【{set_new_otp()}】。 (E21.1)")
+        return self.breakout(mch, "[E72.2验证码过期]", f"{{d}} - 此验证码已过期。当前验证码为【{set_new_otp()}】。 (E72.2)")
     elif chk == 2:
-        return self.breakout(mch, "[E21.2验证码无效]", f"{{d}} - 此验证码无效。当前验证码为【{set_new_otp()}】。 (E21.2)")
+        return self.breakout(mch, "[E72.3验证码无效]", f"{{d}} - 此验证码无效。当前验证码为【{set_new_otp()}】。 (E72.3)")
     else:
         raise WhatTheFuckIsThis
 
@@ -568,12 +568,12 @@ async def Reset(self: Tianzi, _: SupportsGroup) -> SupportsStr:
 
 
 # region LingerAssign
-@translator(f"(?P<main>.*?){RSYN_LA}(?P<name>.+)")
+@translator(f"(?P<val>.*?){RSYN_LA}(?P<cname>.+)")
 async def LingerAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """驻留赋值 「LingerAssign」
     语法：{变量名}>>>{驻留名}"""
-    varnames = await self.stegroup(mch, "main")
-    linger_name = self.egroup(mch, "name")
+    varnames = await self.stegroup(mch, "val")
+    linger_name = self.egroup(mch, "cname")
     linger_names: set[str] = set()
     if varnames:
         for varname in varnames.split():
@@ -588,26 +588,26 @@ async def LingerAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region LingerRef
-@translator(f"{RSYN_LR}(?P<name>.+)")
+@translator(f"{RSYN_LR}(?P<cname>.+)")
 async def LingerRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """驻留引用 「LingerRef」
     语法：<<<{驻留名}"""
-    lingername = self.egroup(mch, "name")
+    lingername = self.egroup(mch, "cname")
     if lingername not in LINGERS.keys():
-        return self.breakout(mch, "[E72驻留名无效]", f"{{d}} - 驻留名{lingername}不存在。 (E72)")
+        return self.breakout(mch, "[E71.1驻留名无效]", f"{{d}} - 驻留名{lingername}不存在。 (E71.1)")
     self.result_cache.caches["Ret"].update(LINGERS[lingername])
     return ""
 
 
 # region Slice
 @translator(
-    f"(?P<main>.+?){RSYN_SLICESEP}(?P<start>[\\-0-9{RCS_INLINE}]+)?{RSYN_SLICESEP}(?P<stop>[\\-0-9\\@{RCS_INLINE}]+)?({RSYN_SLICESEP}(?P<step>[\\-0-9{RCS_INLINE}]+))?"
+    f"(?P<target>.+?){RSYN_SLICESEP}(?P<start>[\\-0-9{RCS_INLINE}]+)?{RSYN_SLICESEP}(?P<stop>[\\-0-9\\@{RCS_INLINE}]+)?({RSYN_SLICESEP}(?P<step>[\\-0-9{RCS_INLINE}]+))?"
 )
 async def Slice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """切片 「Slice」
     语法：{值}:{起始}:{结束}[:步长]"""
     logger.info(f"Slice ← {mch.groupdict()}")
-    main = await self.stegroup(mch, "main")
+    main = await self.stegroup(mch, "target")
     _start = cast(str, await self.tegroup(mch, "start")) or None
     _stop = cast(str, await self.tegroup(mch, "stop")) or None
     _step = cast(str, await self.tegroup(mch, "step")) or None
@@ -625,9 +625,9 @@ async def Slice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             step = _step and int(_step)
             ret = main[start:stop:step]
     except ValueError:
-        return self.breakout(mch, "[E31.1切片参数无效]", "{d} - 切片参数无效。 (E31.1)")
+        return self.breakout(mch, "[E73.11切片参数无效]", "{d} - 切片参数无效。 (E73.11)")
     except IndexError:
-        return self.breakout(mch, "[E31.2切片越界]", "{d} - 切片越界。 (E31.2)")
+        return self.breakout(mch, "[E73.21切片越界]", "{d} - 切片越界。 (E73.21)")
     logger.info(f"Slice → {ret}")
     return ret
 
@@ -642,34 +642,34 @@ async def Config(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     item = self.egroup(mch, "item")
 
     match item.lower():
-        case "enable_cache_name_with_underscore":
+        case "enable_cache_name_with_underscore" | "vu":
             self.current_stat.allow_underscore_in_cache_name = True
         case "disable_cache_name_with_underscore":
             self.current_stat.allow_underscore_in_cache_name = False
-        case "error_level_ignore":
+        case "error_level_ignore" | "eig":
             self.current_stat.err_level = "ignore"
-        case "error_level_abort":
+        case "error_level_abort" | "ea":
             self.current_stat.err_level = "abort"
-        case "error_level_inline":
+        case "error_level_inline" | "eil":
             self.current_stat.err_level = "inline"
-        case "error_level_raise":
+        case "error_level_raise" | "er":
             self.current_stat.err_level = "raise"
         case "max_calculate_output_normal":
             self.current_stat.max_calc_output_length = 512
-        case "max_calculate_output_long":
+        case "max_calculate_output_long" | "cl":
             self.current_stat.max_calc_output_length = 1024
-        case "max_calculate_output_unlimited":
+        case "max_calculate_output_unlimited" | "cu":
             self.current_stat.max_calc_output_length = 1145141919810
         case "disable_pua_warning":
             self.current_stat.allow_pua_warning = False
         case "enable_pua_warning":
             self.current_stat.allow_pua_warning = True
-        case "enable_calc_bignum":
+        case "enable_calc_bignum" | "cb":
             self.current_stat.allow_calc_big_number = True
         case "disable_calc_bignum":
             self.current_stat.allow_calc_big_number = False
         case _:
-            return self.breakout(mch, "[E33.1配置无效]", f"{{d}} - {item} 不是有效的配置项名称。 (E33.1)")
+            return self.breakout(mch, "[E41配置无效]", f"{{d}} - {item} 不是有效的配置项名称。 (E41)")
 
     return ""
 
@@ -684,14 +684,14 @@ async def TheAnswer(self: Tianzi, _: SupportsGroup) -> SupportsStr:
 
 
 # region Calculate
-@translator(f"{RSYN_CALC}\\s?(?P<main>.+)")
+@translator(f"{RSYN_CALC}\\s?(?P<expr>.+)")
 async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """计算 「Calculate」
     语法：={表达式}"""
 
     logger.info(f"Calculate ← {mch.groupdict()}")
 
-    main = self.egroup(mch, "main")
+    main = self.egroup(mch, "expr")
     cache_vars = {
         k: (v.tolist() if isinstance(v, (np.ndarray, awkward.Array, np.generic)) else v)
         for k, v in self.result_cache.caches.get("Ret", {}).items()
@@ -755,8 +755,8 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         if not self.current_stat.allow_calc_big_number and isinstance(ieexp, simpleeval.NumberTooHigh):
             return self.breakout(
                 mch,
-                "[E52.NumberTooHigh计算错误]",
-                "{d} - 计算错误：数值过大。如果需要在沙盒中重试，请指定[[config<enable_calc_bignum>]] (E52.N2H)",
+                "[E73.24数值过大]",
+                "{d} - 计算错误：数值过大。如果需要在沙盒中重试，请指定[[config<enable_calc_bignum>]] (E73.24)",
             )
         logger.info(f"{main} → PySB")
 
@@ -765,15 +765,15 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         except Exception as e:
             return self.breakout(
                 mch,
-                f"[E52.{type(e).__name__}计算失败]",
-                f"{{d}} - 沙盒服务器错误：{type(e).__name__} - {e}；请联系找北 (E52.F{type(e).__name__})",
+                f"[E24.1,{type(e).__name__}计算失败]",
+                f"{{d}} - 沙盒服务器错误：{type(e).__name__} - {e}；请联系找北 (E24.1,{type(e).__name__})",
             )
 
         output = await sandbox.run(main, cache_vars | inner_cache_vars)
         logger.info(f"Calc Server output: {output}")
 
         if output.err.msg or output.err.typ:
-            return self.breakout(mch, f"[E52.{output.err.typ}计算错误]", f"{{d}} - 计算错误：{output.err.msg} (E52.{output.err.typ})")
+            return self.breakout(mch, f"[E24.2,{output.err.typ}计算错误]", f"{{d}} - 计算错误：{output.err.msg} (E24.2,{output.err.typ})")
 
         retdirect = output.retstr if (output.retval is RETVAL_MISSING) or (output.retval is None) else output.retval
 
@@ -785,17 +785,18 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     except KeyboardInterrupt, SystemExit:
         raise
     except BaseException as e:
-        return self.breakout(mch, f"[E52.{type(e).__name__}计算错误]", f"{{d}} - 计算错误：{e} (E52.{type(e).__name__})")
+        traceback.print_exc()
+        return self.breakout(mch, f"[E14,{type(e).__name__}计算错误]", f"{{d}} - 计算错误：{e} (E14,{type(e).__name__})")
 
     if (lsr := len(str(retdirect))) > self.current_stat.max_calc_output_length:
-        return self.breakout(mch, "[E41结果过长]", f"{{d}} - 计算结果过长（{lsr}字符）。(E41)")
+        return self.breakout(mch, "[E60.4结果过长]", f"{{d}} - 计算结果过长（{lsr}字符）。(E60.4)")
 
     logger.info(f"Calculate → {retdirect}")
     return retdirect
 
 
 # region InnerValRef
-@translator(f"{RSYN_IVR}((?P<field>.+?){RSYN_IVFIELD})?(?P<name>.+)")
+@translator(f"{RSYN_IVR}((?P<field>.+?){RSYN_IVFIELD})?(?P<cname>.+)")
 async def InnerValRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """内部值引用 「InnerValRef」
     语法：<<[{作用域}:]{缓存名}"""
@@ -803,7 +804,7 @@ async def InnerValRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     logger.info(f"InnerValRef ← {mch.groupdict()}")
 
     field: str = await self.stegroup(mch, "field")
-    name: str = await self.stegroup(mch, "name")
+    name: str = await self.stegroup(mch, "cname")
 
     if bo := self.check_cache_name(name):
         return bo(mch)
@@ -824,12 +825,12 @@ async def InnerValRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region Reference
-@translator(f"{RSYN_REF}(?P<name>.+)")
+@translator(f"{RSYN_REF}(?P<cname>.+)")
 async def Reference(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """引用 「Reference」
     语法：<{缓存名}"""
     logger.info(f"Reference ← {mch.groupdict()}")
-    name = await self.stegroup(mch, "name")
+    name = await self.stegroup(mch, "cname")
     ret = self.result_cache.get("Ret", name, self.result_cache.get("ReadOnly", name))
     if ret is None:
         raise PosteriorReject
@@ -838,7 +839,7 @@ async def Reference(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region InnerValAssign
-@translator(f"(?P<main>.+?){RSYN_IVA}((?P<field>.+?){RSYN_IVFIELD})?(?P<name>[^{RSYM_CACHE}]+?)(?P<output>{RSYM_CACHE}?)")
+@translator(f"(?P<val>.+?){RSYN_IVA}((?P<field>.+?){RSYN_IVFIELD})?(?P<cname>[^{RSYM_CACHE}]+?)(?P<output>{RSYM_CACHE}?)")
 async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """内部值赋值 「InnerValAssign」
     语法：{值}>>{作用域}:{缓存名}[>]"""
@@ -846,10 +847,10 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     field: str = await self.stegroup(mch, "field")
 
     if not field:
-        return self.breakout(mch, "[E34参数缺失]", "在为内部值赋值的时候，必须指定作用域。(E34)")
+        return self.breakout(mch, "[E71.2作用域缺失]", "在为内部值赋值的时候，必须指定作用域。(E71.2)")
 
-    val: SupportsStr = await self.tegroup(mch, "main")
-    name: str = await self.stegroup(mch, "name") or ""
+    val: SupportsStr = await self.tegroup(mch, "val")
+    name: str = await self.stegroup(mch, "cname") or ""
     output: bool = bool(self.group(mch, "output"))
 
     if bo := self.check_cache_name(name):
@@ -862,7 +863,7 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 # region Font
 @translator(f"""
-    (?P<data>.+?)\\s?
+    (?P<target>.+?)\\s?
     {RSYN_FONT}
     (?P<font>[^{RSYM_TAIL}{RCS_SEP}{RCS_SEGSEP}]+?)
     ({RSYM_MODIFY}
@@ -882,10 +883,10 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     font: dict[int, int] | dict[int | str, int | str] | dict[str, str] | None = fonts.get(font_name.lower(), None)
     if font is None:
-        raise PosteriorReject(mch, "[E61字体无效]", f"{{d}} - 「{font_name}」不是有效的字体名称，也无法被模糊匹配到有效的字体名称。(E61)")
+        raise PosteriorReject(mch, "[E42字体无效]", f"{{d}} - 「{font_name}」不是有效的字体名称。(E42)")
 
     cache_name: str = await self.stegroup(mch, "cname")
-    data: str = await self.stegroup(mch, "data")
+    data: str = await self.stegroup(mch, "target")
     charset: str = await self.stegroup(mch, "charset")
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
@@ -969,13 +970,13 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             v_ftype, v_otype, (value1, value2), _ = numsify((str(lit_value1), str(lit_value2)))
     except OverflowError:
         if rand_type:
-            return self.breakout(mch, "[E11尚未支持]", "{d} - 尚不支持在分布上进行无界选择，还望谅解。(E11)")
-        return self.breakout(mch, "[E35.1边界无效]", "{d} - 边界不可以是Inf或NaN。(E35.1)")
+            return self.breakout(mch, "[E83尚未支持]", "{d} - 尚不支持在分布上进行无界随机，还望谅解。(E83)")
+        return self.breakout(mch, "[E73.33边界无效]", "{d} - 边界不可以是Inf或NaN。(E73.12)")
     except ValueError:
         if self.egroup(mch, "sep") == "-":
             # 一般是带有负数的choice被识别成Range了，此时抛个后验拒绝让choice能吃到
             raise PosteriorReject
-        return self.breakout(mch, "[E36.1解析不能]", f"{{d}} - 输入的边界「{lit_value1}」「{lit_value2}」无法被解析为范围。(E36.1)")
+        return self.breakout(mch, "[E73.13非数值]", f"{{d}} - 输入的边界「{lit_value1}」「{lit_value2}」无法被解析为范围。(E73.13)")
 
     c_ftype: str = self.egroup(mch, "ftype")
     c_otype: str = self.egroup(mch, "fusr")
@@ -1016,13 +1017,13 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             )
         except UnicodeError:
             return self.breakout(
-                mch, "[E42.1码点无效]", f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E42.1)"
+                mch, "[E73.35码点无效]", f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E73.35)"
             )
         except ValueError:
             return self.breakout(
                 mch,
-                "[E33.2格式无效]",
-                f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{chosen}」（{type(chosen).__name__}）。(E33.2)",
+                "[E74.3格式无效]",
+                f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{chosen}」（{type(chosen).__name__}）。(E74.3)",
             )
     else:
         ret = chosen
@@ -1078,7 +1079,7 @@ async def ImmediateNumbers(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 # region Format
 @translator(f"""
-    (?P<data>
+    (?P<target>
         [^{RSYM_MODIFY}\\s\\?]+?
         (?<!({RCG_ELLIPSIS}))
     )
@@ -1116,7 +1117,7 @@ async def Format(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
 
-    data: str = await self.stegroup(mch, "data")
+    data: str = await self.stegroup(mch, "target")
     if not data:
         return ""
     cf_fspec: str = self.egroup(mch, "fspec") or ""
@@ -1167,7 +1168,7 @@ async def Format(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 # region Repeat
 @translator(
-    f"(?P<main>[^{RSYN_REPEAT}{RSYN_REPEATL}]+?)(?P<ast>{RSYN_REPEATL}|{RSYN_REPEAT})(?P<num>[^{RSYM_TAIL}]+?)(\\s?{RSYM_CACHE}(?P<loopvar>[^{RSYM_TAIL}]+?))?(\\s?{RSYM_MODIFY}(?P<offset>[^{RSYM_TAIL}]+?))?(?P<trim>\\.\\.(\\.|\\?|\\!))?"
+    f"(?P<target>[^{RSYN_REPEAT}{RSYN_REPEATL}]+?)(?P<ast>{RSYN_REPEATL}|{RSYN_REPEAT})(?P<num>[^{RSYM_TAIL}]+?)(\\s?{RSYM_CACHE}(?P<loopvar>[^{RSYM_TAIL}]+?))?(\\s?{RSYM_MODIFY}(?P<offset>[^{RSYM_TAIL}]+?))?(?P<trim>\\.\\.(\\.|\\?|\\!))?"
 )
 async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """重复 「Repeat」\
@@ -1181,7 +1182,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     except ValueError:
         return self.breakout(mch, "[E36.5解析不能]", f"{{d}} - 偏移量「{self.egroup(mch, 'offset')}」无法被解析为整数。(E36.5)")
 
-    _head = self.egroup(mch, "main")
+    _head = self.egroup(mch, "target")
 
     logger.info(f"Repeat ←  {lazy=} {loopvar=}")
 
@@ -1246,7 +1247,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (
         (\\s?{RSYM_MODIFY} (?P<rand>({"|".join(rsgs.names)})) )?
         (\\s?{RSYM_CACHE} (?P<cname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
-        (\\s?{RSYM_LENGTH} (?P<length>.+?) )?
+        (\\s?{RSYM_LENGTH} (?P<count>.+?) )?
     ){{3}}
 """)
 async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
@@ -1255,7 +1256,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     cache_name: str = await self.stegroup(mch, "cname")
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
-    length: int = max(1, int(cast(str, await self.tegroup(mch, "length")) or 1))
+    length: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
     rand_type: str = await self.stegroup(mch, "rand")
 
     sep: str = self.group(mch, "sep") or ""
@@ -1314,7 +1315,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (?P<lex>({"|".join(escape(l) for l in lexloader.all_lexicons)}))
     (\\.(?P<colname>[^\\({RSYM_CACHE}]+?))?
     (\\{{(?P<query>.+?)\\}})?
-    ({RSYM_CACHE}(?P<cache_name>.+))?
+    ({RSYM_CACHE}(?P<cname>.+))?
     """)
 async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """词库 「Lex」
@@ -1324,7 +1325,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     lex_name: str = await self.stegroup(mch, "lex")
     colname: str = await self.stegroup(mch, "colname")
     query: str = await self.stegroup(mch, "query")
-    cache_name: str = await self.stegroup(mch, "cache_name")
+    cache_name: str = await self.stegroup(mch, "cname")
     if lex_name not in lexloader.all_lexicons:
         if colname or query:
             return self.breakout(mch, "[E66词库不存在]", f"{{d}} - 没有名为「{lex_name}」的词库")
@@ -1362,13 +1363,13 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region Assign
-@translator(f"(?P<main>[^>]+?){RSYM_CACHE}(?P<name>[^{RSYM_CACHE}]+)(?P<output>{RSYM_CACHE}?)")
+@translator(f"(?P<val>[^>]+?){RSYM_CACHE}(?P<cname>[^{RSYM_CACHE}]+)(?P<output>{RSYM_CACHE}?)")
 async def Assign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """赋值 「Assign」
     语法：{值}>{缓存名}[>]"""
     logger.info(f"Assign ← {mch.groupdict()}")
-    val = await self.tegroup(mch, "main")
-    cache_name = await self.stegroup(mch, "name")
+    val = await self.tegroup(mch, "val")
+    cache_name = await self.stegroup(mch, "cname")
 
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
