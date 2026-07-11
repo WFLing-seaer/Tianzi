@@ -63,7 +63,7 @@ SYM_MODIFY = "@"
 SYM_LENGTH = "="
 SYM_CACHE = ">"
 
-CS_RANGE = "-~－～—到至"  # CharSet
+CS_RANGE = "-－～—"  # CharSet
 CS_SEGSEP = ";；|/"
 CS_SPLITSEP = "，、 "
 CS_SEP = "，、；？,.; \n"
@@ -1359,7 +1359,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     retstr = lex[colname:ret]
 
-    self.result_cache["Ret" : self.egroup(mch, "cache_name")] = retstr
+    self.result_cache["Ret" : self.egroup(mch, "cname")] = retstr
     logger.info(f"Lex → {repr(retstr)} debug: {self.calc_cache.caches}")
     return retstr
 
