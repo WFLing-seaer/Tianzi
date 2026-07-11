@@ -625,7 +625,7 @@ async def Slice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             step = _step and int(_step)
             ret = main[start:stop:step]
     except ValueError:
-        return self.breakout(mch, "[E73.11切片参数无效]", "{d} - 切片参数无效。 (E73.11)")
+        return self.breakout(mch, "[E73.36a切片参数无效]", "{d} - 切片参数无效。 (E73.36a)")
     except IndexError:
         return self.breakout(mch, "[E73.21切片越界]", "{d} - 切片越界。 (E73.21)")
     logger.info(f"Slice → {ret}")
@@ -1017,13 +1017,15 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             )
         except UnicodeError:
             return self.breakout(
-                mch, "[E73.35码点无效]", f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E73.35)"
+                mch,
+                "[E73.35a码点无效]",
+                f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E73.35a)",
             )
         except ValueError:
             return self.breakout(
                 mch,
-                "[E74.3格式无效]",
-                f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{chosen}」（{type(chosen).__name__}）。(E74.3)",
+                "[E74.3a格式无效]",
+                f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{chosen}」（{type(chosen).__name__}）。(E74.3a)",
             )
     else:
         ret = chosen
@@ -1071,7 +1073,7 @@ async def ImmediateNumbers(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         try:
             ret = numify(str(val), lvl=fmt)[2]
         except ValueError:
-            return self.breakout(mch, "[E36.2数值无效]", f"{{d}} - {_fmt or "默认/语法糖"}模式下无效的数值。(E36.2)")
+            return self.breakout(mch, "[E73.16a数值无效]", f"{{d}} - {_fmt or "默认/语法糖"}模式下无效的数值。(E73.16a)")
 
     logger.info(f"ImmediateNumbers → {ret}")
     return ret
@@ -1131,7 +1133,7 @@ async def Format(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     try:
         v_ftype, v_otype, value, _ = numify(data, True)
     except TypeError, ValueError:
-        return self.breakout(mch, "[E36.3解析不能]", f"{{d}} - 输入的值「{data}」无法被解析为数值。(E36.3)")
+        return self.breakout(mch, "[E73.16b解析不能]", f"{{d}} - 输入的值「{data}」无法被解析为数值。(E73.16b)")
 
     value = numsimp(value)
 
@@ -1151,13 +1153,13 @@ async def Format(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         )
     except UnicodeError:
         return self.breakout(
-            mch, "[E42.2码点无效]", f"{{d}} - 输入值「{value}」不是一个有效的Unicode码点。对于u模式，码点数值不应超出0~1114111。(E42.2)"
+            mch, "[E73.35b码点无效]", f"{{d}} - 输入值「{value}」不是一个有效的Unicode码点。对于u模式，码点数值不应超出0~1114111。(E73.35b)"
         )
     except ValueError:
         return self.breakout(
             mch,
-            "[E33.2格式无效]",
-            f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{value}」（{type(value).__name__}）。(E33.2)",
+            "[E74.3b格式无效]",
+            f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{value}」（{type(value).__name__}）。(E74.3b)",
         )
 
     self.result_cache["Ret":cache_name] = ret
@@ -1180,7 +1182,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     try:
         offset: int = int(cast(str, ((await self.tegroup(mch, "offset")) or 0)))
     except ValueError:
-        return self.breakout(mch, "[E36.5解析不能]", f"{{d}} - 偏移量「{self.egroup(mch, 'offset')}」无法被解析为整数。(E36.5)")
+        return self.breakout(mch, "[E73.36c解析不能]", f"{{d}} - 偏移量「{self.egroup(mch, 'offset')}」无法被解析为整数。(E73.36c)")
 
     _head = self.egroup(mch, "target")
 
@@ -1213,17 +1215,17 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     try:
         num: int = int(cast(str, (await self.tegroup(mch, "num"))))
     except ValueError:
-        return self.breakout(mch, "[E36.4解析不能]", f"{{d}} - 次数「{self.egroup(mch, 'num')}」无法被解析为整数。(E36.4)")
+        return self.breakout(mch, "[E73.16c解析不能]", f"{{d}} - 次数「{self.egroup(mch, 'num')}」无法被解析为整数。(E73.16c)")
 
     logger.info(f"Repeat ← {num=}")
 
     if num > 4096:
-        return self.breakout(mch, "[E22.1次数无效]", f"{{d}} - 次数「{num}」超出范围。最大次数为4096。(E22.2)")
+        return self.breakout(mch, "[E60.71次数无效]", f"{{d}} - 次数「{num}」超出范围。最大次数为4096。(E60.71)")
     if len(main) * num > 131072:
         return self.breakout(
             mch,
-            "[E22.2次数无效]",
-            f"{{d}} -次数「{num}」超出范围。在该输入长度（{len(main)}字符）下，最多重复次数为{131072//len(main)}次。(E22.2)",
+            "[E60.72次数无效]",
+            f"{{d}} -次数「{num}」超出范围。在该输入长度（{len(main)}字符）下，最多重复次数为{131072//len(main)}次。(E60.72)",
         )
 
     if lazy:
@@ -1328,7 +1330,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     cache_name: str = await self.stegroup(mch, "cname")
     if lex_name not in lexloader.all_lexicons:
         if colname or query:
-            return self.breakout(mch, "[E66词库不存在]", f"{{d}} - 没有名为「{lex_name}」的词库")
+            return self.breakout(mch, "[E43词库不存在]", f"{{d}} - 没有名为「{lex_name}」的词库。(E43)")
         raise PosteriorReject
     lex = await lexloader.Lexicon.load(lex_name)
 
@@ -1338,7 +1340,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         try:
             ret = int(ret)
         except ValueError:
-            return self.breakout(mch, "[E01填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E01.1)")
+            return self.breakout(mch, "[E73.36b填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E73.36b)")
 
     else:
         if bo := self.check_cache_name(cache_name):
@@ -1347,10 +1349,10 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             ret = lex.schemas.query_pop(query)
         except Exception as e:
             traceback.print_exc()
-            return self.breakout(mch, "[E01填词失败]", f"{{d}} - 填词失败：{repr(e)} (E01)")
+            return self.breakout(mch, "[E09填词失败]", f"{{d}} - 填词失败：{repr(e)} (E09)")
 
     if ret is None:
-        return self.breakout(mch, "[E62填词失败]", "{d} - 没有符合条件的词。(E62)")
+        return self.breakout(mch, "[E51填词失败]", "{d} - 没有符合条件的词。(E51)")
 
     if cache_name:
         self.calc_cache["Lex":f"{lex_name}_{cache_name}"] = ret

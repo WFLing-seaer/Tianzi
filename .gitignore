@@ -10,3 +10,4 @@ lexicons/
 !lexloader/lexicons
 lexloader/lexicons/*
 !lexloader/lexicons/.gitkeep
+!docs/*
