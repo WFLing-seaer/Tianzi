@@ -171,29 +171,22 @@ class Schemas:
         for or_part in or_parts:
             and_queries = _split_and(or_part)
             and_results = []
-            is_first = True
 
             for query_str in and_queries:
                 query_str = query_str.strip()
                 if not query_str:
                     continue
 
+                neg_query = query_str.startswith("!")
+                query_str = query_str[1:] if neg_query else query_str
                 query_content, group_name = _split_g(query_str)
                 query_content = query_content[1:-1] if query_content.startswith("(") and query_content.endswith(")") else query_content
                 if group_name is not None:
                     group_name = group_name.strip()
 
-                if is_first:
-                    is_first = False
-                    if group_name is None:
-                        schemas_iter = chain.from_iterable(self.schemas.values())
-                    else:
-                        if group_name not in self.schemas:
-                            raise KeyError(group_name)
-                        schemas_iter = iter(self.schemas[group_name])
+                if group_name is None:
+                    schemas_iter = chain.from_iterable(self.schemas.values())
                 else:
-                    if group_name is None:
-                        raise SyntaxError(f"除每个或组的第一个查询之外其余查询都必须指定组 @ {query_content}")
                     if group_name not in self.schemas:
                         raise KeyError(group_name)
                     schemas_iter = iter(self.schemas[group_name])
@@ -216,7 +209,7 @@ class Schemas:
             if and_results:
                 or_result = and_results[0]
                 for r in and_results[1:]:
-                    or_result = or_result & r
+                    or_result = or_result & ((~r) if neg_query else r)
                 or_results.append(or_result)
 
         if or_results:
