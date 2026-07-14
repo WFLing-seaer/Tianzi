@@ -751,7 +751,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
                 logger.info(f"{main} → FFSEval")
             except simpleeval.AssignmentAttempted:
                 raise simpleeval.InvalidExpression
-    except simpleeval.InvalidExpression as ieexp:
+    except (simpleeval.InvalidExpression, SyntaxError) as ieexp:
         if not self.current_stat.allow_calc_big_number and isinstance(ieexp, simpleeval.NumberTooHigh):
             return self.breakout(
                 mch,
