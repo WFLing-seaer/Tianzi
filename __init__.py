@@ -1,7 +1,10 @@
+import base64
 import logging
+import random
 import re
 import time
 import traceback
+import zlib
 from collections import deque
 from collections.abc import Mapping
 from typing import Any, cast
@@ -255,6 +258,45 @@ async def pinyin_parse(event: api.Message):
         await event.send(f"{" ".join(repr(s) for s in ss)} → {pinyinparser.syllables_to_str(ss)}")
     except ValueError:
         await event.send("无法解析")
+
+
+GY_CHARSET = "古咕孤故谷估菇固顾姑蛄鼓沽诂牯菰"
+GY_ORIGINAL = ["2D31FC5E97684B0A", "0ACD7B29836E4F51", "3A26075EFC4B81D9", "392AC5780F14B6ED", "A4DE3B586027F1C9"]
+
+
+@on_message("不发 鸽曰\\+ .+")
+async def geyue_cipher(event: api.Message):
+    msg = event.message_str[6:].strip()
+    orig_used = random.randint(0, 4)
+    trans = str.maketrans(GY_ORIGINAL[orig_used], GY_CHARSET)
+    data = zlib.compress(msg.encode("utf8"), 9)
+    if len(data) > 768:
+        await event.send("让我咕这么长一坨你是要累死我吗😡👊")
+        return
+    ciphered = base64.b16encode(data).decode("ascii").translate(trans)
+    pad = 3 - (len(ciphered)) % 3  # 用最后一个字符标识pad了多长以及使用的顺序，因此pad长度是1/2/3而不是0/1/2（也就是一定会有pad）
+    padchar = GY_CHARSET[pad - 1 + orig_used * 3]
+    ciphered += "".join(random.choices(GY_CHARSET, k=pad - 1)) + padchar
+    await event.send("！".join((ciphered[i : i + 3] for i in range(0, len(ciphered), 3))) + "！")
+
+
+@on_message("不发 鸽曰\\- .+")
+async def geyue_decipher(event: api.Message):
+    try:
+        msg = event.message_str[6:].strip().replace("！", "")
+        padchar = msg[-1]
+        padinfo = GY_CHARSET.index(padchar)
+        pad, orig_used = padinfo % 3 + 1, padinfo // 3
+        msg = msg[:-pad]
+        trans = str.maketrans(GY_CHARSET, GY_ORIGINAL[orig_used])
+        deciphered_data = base64.b16decode(msg.translate(trans))
+        deciphered = zlib.decompress(deciphered_data).decode("utf8")
+        if len(deciphered) / len(msg) > 8:
+            await event.send("压缩炸弹是吧😡👊")
+            return
+        await event.send(deciphered)
+    except Exception:
+        await event.send("咕咕嘎嘎的说什么呢，听不懂")
 
 
 @on_cleanup()
