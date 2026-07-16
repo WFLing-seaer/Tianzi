@@ -15,7 +15,7 @@ async def shorturl(url: str, timeout: int = 1) -> str:
     if ret.status_code != 200:
         return url
     json = ret.json()
-    return f"https://hongbot.icu/l/{json["id"]}"
+    return f"https://l.hongbot.icu/{json["id"]}"
 
 
 # 自己实际用的时候换成urlvanish或者其他别的短链接服务就行，懒的话直接return url都完全没问题
