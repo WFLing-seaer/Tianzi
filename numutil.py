@@ -68,6 +68,7 @@ def numify(text: str, suppress_overflow: bool = False, lvl: NILVL | NSLVL | None
                 return "d", "c", int(x), NILVL.C
             except ValueError:
                 return "f", "c", float(x), NILVL.C
+            # cn2an 0.5.24加了个str的输出，但是只在direct下会有，但是！！！tmd没用重载所以要么再转一遍要么cast
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.R) or (lvl == NSLVL.R):
             return "f", "r", rn2an.rn2an(text), NILVL.R
