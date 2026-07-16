@@ -59,7 +59,7 @@ def numify(text: str, suppress_overflow: bool = False, lvl: NILVL | NSLVL | None
             if (not suppress_overflow) and (isinf(val.real) or isnan(val.real) or isinf(val.imag) or isnan(val.imag)):
                 raise OverflowError
             return "", "n", val, NILVL.I
-    with contextlib.suppress(ValueError):
+    with contextlib.suppress(ValueError, IndexError):
         if (lvl is None) or (lvl == NILVL.C) or (lvl == NSLVL.C):
             with contextlib.suppress(ValueError):
                 return "d", "c", int(text), NILVL.C  # 因为cn2an会把原本就是阿拉伯数字的整数转成浮点数，因此此处通过int将这种情况短路掉
