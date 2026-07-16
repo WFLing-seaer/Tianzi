@@ -63,7 +63,11 @@ def numify(text: str, suppress_overflow: bool = False, lvl: NILVL | NSLVL | None
         if (lvl is None) or (lvl == NILVL.C) or (lvl == NSLVL.C):
             with contextlib.suppress(ValueError):
                 return "d", "c", int(text), NILVL.C  # 因为cn2an会把原本就是阿拉伯数字的整数转成浮点数，因此此处通过int将这种情况短路掉
-            return "d", "c", cn2an.cn2an(text, "smart"), NILVL.C
+            x = cn2an.cn2an(text, "smart")
+            try:
+                return "d", "c", int(x), NILVL.C
+            except ValueError:
+                return "f", "c", float(x), NILVL.C
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.R) or (lvl == NSLVL.R):
             return "f", "r", rn2an.rn2an(text), NILVL.R
