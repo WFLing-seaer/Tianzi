@@ -34,6 +34,7 @@ import awkward
 import numpy as np
 import regex
 import simpleeval
+import xxhash
 from cachetools import LRUCache, TTLCache
 from regex import Match as _Match
 from regex import Pattern as _Pattern
@@ -555,17 +556,23 @@ async def Nocensor(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region Reset
-@translator("RST")
-async def Reset(self: Tianzi, _: SupportsGroup) -> SupportsStr:
+@translator("RST(?P<seed> [0-9]+)?")
+async def Reset(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """重置 「Reset」
     语法：RST"""
     logger.info("Reset")
+    logger.info(f"Reset ← {mch.groupdict()}")
     self.calc_cache.clear()
     self.result_cache.clear()
     self.parse_cache.clear()
     for lex in lexloader.LOAD_CACHE.values():
         lex.schemas.qcache.clear()
     self.nested_inline_epacse.clear()
+
+    global random, nrandom
+    random.seed(self.group(mch, "seed") or None)
+    nrandom = np.random.default_rng(xxhash.xxh128_intdigest(self.group(mch, "seed")) if self.group(mch, "seed") else None)
+
     return ""
 
 
