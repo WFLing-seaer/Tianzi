@@ -124,7 +124,7 @@ RCS_CJK = (
 type Match = _Match[str]
 type Pattern = _Pattern[str]
 type Translator = Callable[[Tianzi, SupportsGroup], Coroutine[None, None, SupportsStr]]
-MaybeNone: TypeAlias = Any  # typeshed就是这么写的……我直接cv了
+MaybeNone: TypeAlias = Any  # typeshed就是这么写的……我直接cv了  # noqa: UP040 遵照原文
 
 
 class BreakOut(Exception):
@@ -258,8 +258,8 @@ class _AsyncCleanupQueue:
                 cls._queue.task_done()
             except asyncio.CancelledError:
                 break
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001
+                traceback.print_exc()
 
     @classmethod
     async def wait_all_cleanup(cls):
@@ -570,7 +570,7 @@ async def Reset(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         lex.schemas.qcache.clear()
     self.nested_inline_epacse.clear()
 
-    global random, nrandom
+    global nrandom
     random.seed(self.group(mch, "seed") or None)
     nrandom = np.random.default_rng(xxhash.xxh128_intdigest(self.group(mch, "seed")) if self.group(mch, "seed") else None)
     randutil.set_nrandom(nrandom)
@@ -591,7 +591,6 @@ async def LingerAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             linger_names.add(varname)
     else:
         linger_names |= self.result_cache.caches["Ret"].keys()
-    global LINGERS
     LINGERS[linger_name] = {
         varname: self.result_cache.caches["Ret"][varname] for varname in linger_names if varname in self.result_cache.caches["Ret"]
     }
@@ -604,7 +603,7 @@ async def LingerRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """驻留引用 「LingerRef」
     语法：<<<{驻留名}"""
     lingername = self.egroup(mch, "cname")
-    if lingername not in LINGERS.keys():
+    if lingername not in LINGERS:
         return self.breakout(mch, "[E71.1驻留名无效]", f"{{d}} - 驻留名{lingername}不存在。 (E71.1)")
     self.result_cache.caches["Ret"].update(LINGERS[lingername])
     return ""
@@ -631,9 +630,9 @@ async def Slice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         else:
             if not _start and not _stop and not _step:
                 raise PosteriorReject
-            start = _start and int(_start)
-            stop = _stop and int(_stop)
-            step = _step and int(_step)
+            start = cast(int | None, _start and int(_start))
+            stop = cast(int | None, _stop and int(_stop))
+            step = cast(int | None, _step and int(_step))
             ret = main[start:stop:step]
     except ValueError:
         return self.breakout(mch, "[E73.36a切片参数无效]", "{d} - 切片参数无效。 (E73.36a)")
@@ -725,7 +724,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         for field, names in self.calc_cache.caches.items()
     }
 
-    print(f"debug: {repr(cache_vars)} {repr(inner_cache_vars)}")
+    print(f"debug: {cache_vars!r} {inner_cache_vars!r}")
 
     class FFSEval(simpleeval.SimpleEval):
         @staticmethod
@@ -789,7 +788,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
         try:
             sandbox = await self.get_sandbox()
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return self.breakout(
                 mch,
                 f"[E24.1,{type(e).__name__}计算失败]",
@@ -811,7 +810,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     except KeyboardInterrupt, SystemExit:
         raise
-    except BaseException as e:
+    except BaseException as e:  # noqa: BLE001
         traceback.print_exc()
         return self.breakout(mch, f"[E14,{type(e).__name__}计算错误]", f"{{d}} - 计算错误：{e} (E14,{type(e).__name__})")
 
@@ -1374,9 +1373,9 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             return bo(mch)
         try:
             ret = lex.schemas.query_pop(query)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             traceback.print_exc()
-            return self.breakout(mch, "[E09填词失败]", f"{{d}} - 填词失败：{repr(e)} (E09)")
+            return self.breakout(mch, "[E09填词失败]", f"{{d}} - 填词失败：{e!r} (E09)")
 
     if ret is None:
         return self.breakout(mch, "[E51填词失败]", "{d} - 没有符合条件的词。(E51)")
@@ -1387,7 +1386,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     retstr = lex[colname:ret]
 
     self.result_cache["Ret" : self.egroup(mch, "cname")] = retstr
-    logger.info(f"Lex → {repr(retstr)} debug: {self.calc_cache.caches}")
+    logger.info(f"Lex → {retstr!r} debug: {self.calc_cache.caches}")
     return retstr
 
 
