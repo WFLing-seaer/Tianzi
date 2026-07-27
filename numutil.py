@@ -139,7 +139,7 @@ def numfmt(
     match output_mode:
         case "c" | "C":
             if isinstance(value, complex):
-                raise ValueError
+                raise TypeError
             # 执行对中文数字的格式化。这个好像没有现成的库可以用，只能自己写
             if ftype == "%":
                 value *= 100
@@ -161,17 +161,17 @@ def numfmt(
             return ret
         case "u":
             if not isinstance(value, int):
-                raise ValueError
+                raise TypeError
             if not (0 <= value <= 0x10FFFF):
                 raise UnicodeError
             ret = chr(value)
         case "r":
             if isinstance(value, complex):
-                raise ValueError
+                raise TypeError
             ret = rn2an.an2rnA(value)
         case "R":
             if isinstance(value, complex):
-                raise ValueError
+                raise TypeError
             ret = rn2an.an2rn(value)
         case _:
             ret = str(value)

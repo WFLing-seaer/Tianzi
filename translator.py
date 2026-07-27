@@ -1047,7 +1047,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
                 "[E73.35a码点无效]",
                 f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E73.35a)",
             )
-        except ValueError:
+        except TypeError:
             return self.breakout(
                 mch,
                 "[E74.3a格式无效]",
@@ -1181,7 +1181,7 @@ async def Format(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         return self.breakout(
             mch, "[E73.35b码点无效]", f"{{d}} - 输入值「{value}」不是一个有效的Unicode码点。对于u模式，码点数值不应超出0~1114111。(E73.35b)"
         )
-    except ValueError:
+    except TypeError:
         return self.breakout(
             mch,
             "[E74.3b格式无效]",
