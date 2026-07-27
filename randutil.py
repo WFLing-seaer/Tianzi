@@ -8,6 +8,14 @@ if __package__:
 else:
     from nameutil import Names
 
+nrandom: np.random.Generator = np.random.default_rng()
+
+
+def set_nrandom(nr: np.random.Generator) -> None:
+    global nrandom
+    nrandom = nr
+
+
 rsgs: Names[Callable[[int], np.ndarray]] = Names()
 rngs: Names[Callable[[], float]] = Names()
 
@@ -310,7 +318,7 @@ def rng_norm():
     domain_min = -3.2905267315
     domain_max = 3.2905267315
     while True:
-        val = stats.norm.rvs(loc=0, scale=1)
+        val = stats.norm.rvs(loc=0, scale=1, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -321,7 +329,7 @@ def rng_t():
     domain_max = 8.6103015813
     df = 4
     while True:
-        val = stats.t.rvs(df=df)
+        val = stats.t.rvs(df=df, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -354,7 +362,7 @@ def rng_chi2():
     domain_max = 18.4668269
     df = 4
     while True:
-        val = stats.chi2.rvs(df=df)
+        val = stats.chi2.rvs(df=df, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -365,7 +373,7 @@ def rng_f():
     domain_max = 15.9770248525577
     df1, df2 = 4, 4
     while True:
-        val = stats.f.rvs(df1, df2)
+        val = stats.f.rvs(df1, df2, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -376,7 +384,7 @@ def rng_exp():
     domain_max = 6.9077552789821
     scale = 1
     while True:
-        val = stats.expon.rvs(scale=scale)
+        val = stats.expon.rvs(scale=scale, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -387,7 +395,7 @@ def rng_cauchy():
     domain_max = 6.313751514675
     loc, scale = 0, 1
     while True:
-        val = stats.cauchy.rvs(loc=loc, scale=scale)
+        val = stats.cauchy.rvs(loc=loc, scale=scale, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -398,7 +406,7 @@ def rng_weibull():
     domain_max = 1.471863002149
     c, scale = 5, 1
     while True:
-        val = stats.weibull_min.rvs(c, scale=scale)
+        val = stats.weibull_min.rvs(c, scale=scale, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -409,7 +417,7 @@ def rng_gamma():
     domain_max = 22.45774448485
     alpha, beta = 3, 2
     while True:
-        val = stats.gamma.rvs(a=alpha, scale=1 / beta)
+        val = stats.gamma.rvs(a=alpha, scale=1 / beta, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -417,7 +425,7 @@ def rng_gamma():
 @rngs.named("β", "beta", "贝塔", "贝塔分布", "β分布", "b分布", "b-分布")
 def rng_beta():
     a, b = 2, 2
-    return stats.beta.rvs(a, b)
+    return stats.beta.rvs(a, b, random_state=nrandom)
 
 
 @rngs.named("log", "ln", "logn", "lognorm", "对数正态", "对数正态分布")
@@ -426,7 +434,7 @@ def rng_lognorm():
     domain_max = 10.2404736563121
     mu, sigma = 0, 1
     while True:
-        val = stats.lognorm.rvs(s=sigma, scale=np.exp(mu))
+        val = stats.lognorm.rvs(s=sigma, scale=np.exp(mu), random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -437,7 +445,7 @@ def rng_logistic():
     domain_max = 15.586609649449
     loc, scale = 5, 2
     while True:
-        val = stats.logistic.rvs(loc=loc, scale=scale)
+        val = stats.logistic.rvs(loc=loc, scale=scale, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)
 
@@ -456,6 +464,6 @@ def rng_laplace():
     domain_max = 4.60517018599
     loc, scale = 0, 1
     while True:
-        val = stats.laplace.rvs(loc=loc, scale=scale)
+        val = stats.laplace.rvs(loc=loc, scale=scale, random_state=nrandom)
         if domain_min <= val < domain_max:
             return (val - domain_min) / (domain_max - domain_min)

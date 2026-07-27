@@ -40,7 +40,7 @@ from regex import Match as _Match
 from regex import Pattern as _Pattern
 from regex import escape
 
-from . import lexloader
+from . import lexloader, randutil
 from .cacheutil import Cache
 from .fontutil import fonts
 from .numutil import NSLVL, Value, numfmt, numify, numsify, numsimp
@@ -191,6 +191,7 @@ class DuckMatch:
 
 random = Random(ANSWER_TO_THE_ULTIMATE_QUESTION_OF_LIFE_THE_UNIVERSE_AND_EVERYTHING.ANSWER)
 nrandom = np.random.default_rng(ANSWER_TO_THE_ULTIMATE_QUESTION_OF_LIFE_THE_UNIVERSE_AND_EVERYTHING.ANSWER)
+randutil.set_nrandom(nrandom)
 
 logger = getLogger("translators")
 
@@ -572,6 +573,7 @@ async def Reset(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     global random, nrandom
     random.seed(self.group(mch, "seed") or None)
     nrandom = np.random.default_rng(xxhash.xxh128_intdigest(self.group(mch, "seed")) if self.group(mch, "seed") else None)
+    randutil.set_nrandom(nrandom)
 
     return ""
 
