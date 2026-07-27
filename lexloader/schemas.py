@@ -21,12 +21,12 @@ if __package__:
     from .colproto import ColProtoABC, Pinyin, PlainText, SortedColABC, _Int, _Length
     from .headparser import TColSpec
     from .nputil import find_first_true, get_k_ts
-    from .typing_utils import ArrayLike, AwkwardLike
+    from .typing_utils import ArrayLike, AwkwardLike, asAwkwardLike
 else:
     from colproto import ColProtoABC, Pinyin, PlainText, SortedColABC, _Int, _Length
     from headparser import TColSpec
     from nputil import find_first_true, get_k_ts
-    from typing_utils import ArrayLike, AwkwardLike
+    from typing_utils import ArrayLike, AwkwardLike, asAwkwardLike
 
 
 schemas = []
@@ -288,8 +288,13 @@ class SchemaABC(ABC):
         self.cols = cols
 
     def query(self, q: str) -> AwkwardLike | None:
-        mch = self.query_re_pat.search(q)
-        return None if mch is None else self._query(mch)
+        mchs = list(self.query_re_pat.finditer(q))
+        if not mchs:
+            return None
+        ret = self._query(mchs[0])
+        for m in mchs[1:]:
+            ret = ret & self._query(m)
+        return asAwkwardLike(ret)
 
     def checkinit(self):
         # schema可以自定义checkinit检查初始化分配的列，返回False表示初始化不合法
