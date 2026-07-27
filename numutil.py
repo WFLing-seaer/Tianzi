@@ -35,35 +35,35 @@ type Numerals = tuple[Literal["d", "x", "X", "f", "", "s"], Literal["c", "C", "u
 
 
 def numify(text: str, suppress_overflow: bool = False, lvl: NILVL | NSLVL | None = None, sugar: bool = True) -> Numeral:
-    text = normalize("NFKC", text)
     if sugar and (lvl is None):
         lvl = {"0x": NILVL.X, "0f": NILVL.F, "0i": NILVL.I, "0r": NILVL.R, "0u": NILVL.U}.get(text[:2])
         # 语法糖。复数为0i以避免和十六进制0c混淆。注意开启语法糖会导致0xXXX的类型由N变为X。0bXXX、0oXXX不受此影响。
         if lvl is not None:
-            text = text[2:]
+            ntext = text[2:]
+    ntext = normalize("NFKC", text)
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.N) or (lvl == NSLVL.N):
-            return "d", "n", int(text), NILVL.N
+            return "d", "n", int(ntext), NILVL.N
     with contextlib.suppress(ValueError):
-        if ((lvl is None) or (lvl == NILVL.X) or (lvl == NSLVL.X)) and (text.islower() or text.isdecimal()):
-            return "x", "n", int(text, 16), NILVL.X
+        if ((lvl is None) or (lvl == NILVL.X) or (lvl == NSLVL.X)) and (ntext.islower() or ntext.isdecimal()):
+            return "x", "n", int(ntext, 16), NILVL.X
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.F) or (lvl == NSLVL.N):
-            val = float(text)
+            val = float(ntext)
             if (not suppress_overflow) and (isinf(val) or isnan(val)):
                 raise OverflowError
             return "f", "n", val, NILVL.F
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.I) or (lvl == NSLVL.N):
-            val = complex(text)
+            val = complex(ntext)
             if (not suppress_overflow) and (isinf(val.real) or isnan(val.real) or isinf(val.imag) or isnan(val.imag)):
                 raise OverflowError
             return "", "n", val, NILVL.I
     with contextlib.suppress(ValueError, IndexError):
         if (lvl is None) or (lvl == NILVL.C) or (lvl == NSLVL.C):
             with contextlib.suppress(ValueError):
-                return "d", "c", int(text), NILVL.C  # 因为cn2an会把原本就是阿拉伯数字的整数转成浮点数，因此此处通过int将这种情况短路掉
-            x = cn2an.cn2an(text, "smart")
+                return "d", "c", int(ntext), NILVL.C  # 因为cn2an会把原本就是阿拉伯数字的整数转成浮点数，因此此处通过int将这种情况短路掉
+            x = cn2an.cn2an(ntext, "smart")
             try:
                 return "d", "c", int(x), NILVL.C
             except ValueError:
@@ -71,10 +71,10 @@ def numify(text: str, suppress_overflow: bool = False, lvl: NILVL | NSLVL | None
             # cn2an 0.5.24加了个str的输出，但是只在direct下会有，但是！！！tmd没用重载所以要么再转一遍要么cast
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.R) or (lvl == NSLVL.R):
-            return "f", "r", rn2an.rn2an(text), NILVL.R
+            return "f", "r", rn2an.rn2an(ntext), NILVL.R
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.X) or (lvl == NSLVL.XU):
-            return "X", "n", int(text, 16), NILVL.X
+            return "X", "n", int(ntext, 16), NILVL.X
     with contextlib.suppress(TypeError):
         if (lvl is None) or (lvl == NILVL.U) or (lvl == NSLVL.U):
             return "s", "u", ord(text), NILVL.U
