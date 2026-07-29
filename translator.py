@@ -1399,7 +1399,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         try:
             ret = int(ret)
         except ValueError:
-            return self.breakout(mch, "[E73.36b填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E73.36b)")
+            return self.breakout(mch, "[E73.4b填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E73.4b)")
 
     else:
         if bo := self.check_cache_name(cache_name):
