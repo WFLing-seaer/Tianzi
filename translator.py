@@ -1321,7 +1321,10 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     if len(splitted) <= 1:
         raise PosteriorReject
-    count = min(count, len(splitted))
+
+    if count > len(splitted):
+        replace = True
+
     _cache_name = f"{cache_name}_{count}"
 
     weights = None
