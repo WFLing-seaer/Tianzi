@@ -984,7 +984,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     cached_rand: list[float] | None = self.calc_cache.get("Range", f"{cache_name}_{count}", None)
     rng = rngs.get(rand_type, random.random)
     rands: list[float] = [rng() for _ in range(count)] if cached_rand is None else cached_rand
-    self.calc_cache["Range":f"{cache_name}_{count}"] = rands
+    self.calc_cache["Range":f"{cache_name}_{count}"] = rands[0] if len(rands) == 1 else rands
 
     lit_value1, lit_value2 = (await self.tegroup(mch, "left")), (await self.tegroup(mch, "right"))
     try:
@@ -1047,7 +1047,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     rets: list[str | Value] = []
 
     for chosen in chosens:
-        if cf_fspec or (otype != "nul"):
+        if cf_fspec or (otype not in ("n", "nul")):
             try:
                 ret: str | Value = numfmt(
                     fusr_to_nfmt_fmt(otype),
@@ -1331,14 +1331,14 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if cache_name:
         weights: list[float] | None = self.calc_cache.get("Choice", _cache_name)
         if weights is None:
-            _rand: float | list[float] | None = self.calc_cache.get("Range", cache_name)
+            _rand: float | list[float] | None = self.calc_cache.get("Range", _cache_name)
             weights = [0.0] * len(splitted)
             if isinstance(_rand, float):
                 weights[int(_rand * len(splitted))] = 1.0
             elif isinstance(_rand, list):
                 replace = True
                 for _r_item in _rand:
-                    weights[int(_r_item * len(splitted))] = 1.0
+                    weights[int(_r_item * len(splitted))] = 1 / len(_rand)
             else:
                 weights = None
     if weights is None:
