@@ -961,7 +961,10 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         (\\s?[{RSYM_CACHE}]
             (?P<cname>.+?)
         )?
-    ){{3}}""")
+        (\\s?{RSYM_LENGTH}
+            (?P<count>.+?)
+        )?
+    ){{4}}""")
 async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """随机数 「Range」
     语法：{下界}-{上界}[:[{Python式格式};]{转换格式}][@{分布}][>{缓存名}]"""
@@ -970,13 +973,18 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     cache_name: str = await self.stegroup(mch, "cname")
     rand_type: str = await self.stegroup(mch, "rand")
+    try:
+        count: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
+    except ValueError:
+        return self.breakout(mch, "[E73.37b解析不能]", f"{{d}} - 选择数「{self.egroup(mch, 'count')}」无法被解析为整数。(E73.37b)")
 
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
 
-    cached_rand: float | None = self.calc_cache.get("Range", cache_name, None) if cache_name else None
-    rand: float = rngs.get(rand_type, random.random)() if cached_rand is None else cached_rand
-    self.calc_cache["Range":cache_name] = rand
+    cached_rand: list[float] | None = self.calc_cache.get("Range", f"{cache_name}_{count}", None)
+    rng = rngs.get(rand_type, random.random)
+    rands: list[float] = [rng() for _ in range(count)] if cached_rand is None else cached_rand
+    self.calc_cache["Range":f"{cache_name}_{count}"] = rands
 
     lit_value1, lit_value2 = (await self.tegroup(mch, "left")), (await self.tegroup(mch, "right"))
     try:
@@ -1020,45 +1028,57 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         f"Range: {lit_value1=} {lit_value2=} {value1=} {value2=} {v_ftype=} {v_otype=} {ftype=} {otype=} {cf_fspec=} {cf_fill=} {cf_align=} {cf_sign=} {cf_perc=}"
     )
 
-    if isinstance(value1, int) and isinstance(value2, int):
-        chosen = value1 + int((value2 - value1 + 1) * rand)
-    else:
-        chosen = value1 + (value2 - value1) * rand
+    chosens: list[Value] = []
 
-    chosen: Value = numsimp(chosen)
+    closedrange = isinstance(value1, int) and isinstance(value2, int)
 
-    self.result_cache["Ret":cache_name] = chosen
+    for rand in rands:
+        if closedrange:
+            chosen = value1 + int(cast(int, (value2 - value1 + 1)) * rand)
+        else:
+            chosen = value1 + (value2 - value1) * rand
 
-    if cf_fspec or (otype != "nul"):
-        try:
-            ret: str | Value = numfmt(
-                fusr_to_nfmt_fmt(otype),
-                cf_fspec,
-                cf_fill,
-                cf_align,
-                cf_sign,
-                cf_perc,
-                ftype,
-                chosen,
-            )
-        except UnicodeError:
-            return self.breakout(
-                mch,
-                "[E73.35a码点无效]",
-                f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E73.35a)",
-            )
-        except TypeError:
-            return self.breakout(
-                mch,
-                "[E74.3a格式无效]",
-                f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{chosen}」（{type(chosen).__name__}）。(E74.3a)",
-            )
-    else:
-        ret = chosen
+        chosen: Value = numsimp(chosen)
 
-    logger.info(f"Range → {ret}")
+        chosens.append(chosen)
 
-    return ret
+    self.result_cache["Ret":cache_name] = chosens[0] if len(chosens) == 1 else chosens
+
+    rets: list[str | Value] = []
+
+    for chosen in chosens:
+        if cf_fspec or (otype != "nul"):
+            try:
+                ret: str | Value = numfmt(
+                    fusr_to_nfmt_fmt(otype),
+                    cf_fspec,
+                    cf_fill,
+                    cf_align,
+                    cf_sign,
+                    cf_perc,
+                    ftype,
+                    chosen,
+                )
+            except UnicodeError:
+                return self.breakout(
+                    mch,
+                    "[E73.35a码点无效]",
+                    f"{{d}} - 随机结果「{chosen}」不是一个有效的Unicode码点。对于u模式，上下界不应超出0~1114111。(E73.35a)",
+                )
+            except TypeError:
+                return self.breakout(
+                    mch,
+                    "[E74.3a格式无效]",
+                    f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{chosen}」（{type(chosen).__name__}）。(E74.3a)",
+                )
+        else:
+            ret = chosen
+
+        rets.append(ret)
+
+    logger.info(f"Range → {rets}")
+
+    return rets[0] if len(rets) == 1 else " ".join(map(str, rets))
 
 
 # region ImmediateNumbers
@@ -1241,7 +1261,8 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     try:
         num: int = int(cast(str, (await self.tegroup(mch, "num"))))
     except ValueError:
-        return self.breakout(mch, "[E73.16c解析不能]", f"{{d}} - 次数「{self.egroup(mch, 'num')}」无法被解析为整数。(E73.16c)")
+        return self.breakout(mch, "[E73.37b解析不能]", f"{{d}} - 次数「{self.egroup(mch, 'num')}」无法被解析为整数。(E73.37b)")
+        # 如果translate结果直接是浮点数，int会对其向下取整，这种情况下理应抛出73.37但是目前暂时不做该实现。TODO
 
     logger.info(f"Repeat ← {num=}")
 
@@ -1277,6 +1298,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         (\\s?{RSYM_CACHE} (?P<cname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
         (\\s?{RSYM_LENGTH} (?P<count>.+?) )?
     ){{3}}
+    (?P<replace>\\.\\.\\.)?
 """)
 async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """选择 「Choice」 语法：{选项1} {选项2} {选项3}...[>{缓存名}][@{分布}][={选择数}]"""
@@ -1284,7 +1306,12 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     cache_name: str = await self.stegroup(mch, "cname")
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
-    length: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
+    try:
+        count: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
+    except ValueError:
+        return self.breakout(mch, "[E73.37c解析不能]", f"{{d}} - 选择数「{self.egroup(mch, 'count')}」无法被解析为整数。(E73.37c)")
+
+    replace = bool(mch.group("replace"))
     rand_type: str = await self.stegroup(mch, "rand")
 
     sep: str = self.group(mch, "sep") or ""
@@ -1294,17 +1321,23 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     if len(splitted) <= 1:
         raise PosteriorReject
-    length = min(length, len(splitted))
-    _cache_name = f"{cache_name}${length}"
+    count = min(count, len(splitted))
+    _cache_name = f"{cache_name}_{count}"
 
     weights = None
     if cache_name:
         weights: list[float] | None = self.calc_cache.get("Choice", _cache_name)
-        if weights is None and length == 1:
-            _rand: float | None = self.calc_cache.get("Range", cache_name)
-            if _rand is not None:
-                weights = [0.0] * len(splitted)
+        if weights is None:
+            _rand: float | list[float] | None = self.calc_cache.get("Range", cache_name)
+            weights = [0.0] * len(splitted)
+            if isinstance(_rand, float):
                 weights[int(_rand * len(splitted))] = 1.0
+            elif isinstance(_rand, list):
+                replace = True
+                for _r_item in _rand:
+                    weights[int(_r_item * len(splitted))] = 1.0
+            else:
+                weights = None
     if weights is None:
         if rand_type:
             weights = list(rsgs[rand_type](len(splitted)))
@@ -1330,7 +1363,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if cache_name:
         self.calc_cache["Choice":_cache_name] = weights
 
-    chosens: list[str] = list(nrandom.choice(options, length, False, weights))
+    chosens: list[str] = list(nrandom.choice(options, count, replace, weights))
     chosens = [str(await self.translate(opt)) for opt in chosens]
     ret = sep.join(chosens)
     self.result_cache["Ret":cache_name] = ret
