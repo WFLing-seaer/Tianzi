@@ -40,7 +40,7 @@ from regex import Match as _Match
 from regex import Pattern as _Pattern
 from regex import escape
 
-from . import lexloader, randutil
+from . import aliasutil, lexloader, randutil
 from .cacheutil import Cache
 from .fontutil import fonts
 from .numutil import NSLVL, Value, numfmt, numify, numsify, numsimp
