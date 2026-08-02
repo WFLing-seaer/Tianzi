@@ -94,7 +94,7 @@ class SortedColABC(ABC):
 
             cmp = 0
             min_len = s_end - s_start
-            if min_len > t_len:
+            if min_len > t_len:  # noqa: PLR1730
                 min_len = t_len
 
             for i in range(min_len):
@@ -132,8 +132,7 @@ class SortedColABC(ABC):
 
             cmp = 0
             min_len = s_end - s_start
-            if min_len > t_len:
-                min_len = t_len
+            min_len = min(min_len, t_len)
 
             for i in range(min_len):
                 d_val = data[s_start + i]
@@ -660,7 +659,7 @@ class Pinyin(ColProtoABC[list[int]]):
         __p_check(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x)
 
     def query(self, m: int | None, n: int | None, iw: Iterable[bool] | bool, fw: Iterable[bool] | bool, s: Iterable[Syllable]) -> ArrayLike:
-        print(f"m={repr(m)}, n={repr(n)}, iw={repr(iw)}, fw={repr(fw)}, s={repr(s)}")
+        print(f"m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, s={s!r}")
         offset: ArrayLike = self.data.layout.offsets.data
         data: ArrayLike = self.data.layout.content.data
 

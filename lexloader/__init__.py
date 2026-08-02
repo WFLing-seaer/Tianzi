@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import pathlib
+import zoneinfo
 from typing import cast
 
 import awkward
@@ -46,7 +47,10 @@ class Lexicon:
         file_size = file_stat.st_size
         file_size_num, file_size_amp = unitutil.byte2size(file_size)
         file_last_updated = file_stat.st_mtime
-        file_last_updated_str = datetime.datetime.fromtimestamp(file_last_updated).strftime("%Y-%m-%d %H:%M:%S")
+        file_last_updated_str = datetime.datetime.fromtimestamp(
+            file_last_updated,
+            tz=zoneinfo.ZoneInfo("Asia/Shanghai"),
+        ).strftime("%Y-%m-%d %H:%M:%S")
         array_size = sum(getattr(arr.data, "nbytes", 0) for arr in self.schemas.cols.values())
         arr_size_num, arr_size_amp = unitutil.byte2size(array_size)
         column_names = self.schemas.cols.keys()

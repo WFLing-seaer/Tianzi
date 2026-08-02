@@ -7,4 +7,4 @@ except ImportError, ModuleNotFoundError:
 
 
 if IN_AHA:
-    from .ahainit import *  # noqa: F403
+    from .ahainit import *
