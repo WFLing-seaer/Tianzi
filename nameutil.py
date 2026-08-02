@@ -43,7 +43,7 @@ class Names[T]:
         return self.origs.get(name, default)
 
     def fuzzy(self, name: str, default: D = None, threshold: int = 70) -> T | D:
-        from fuzzywuzzy import process
+        from thefuzz import process
 
         name = name.lower()
         best = process.extractOne(name, self.names, scorer=process.fuzz.ratio)
