@@ -1440,3 +1440,16 @@ async def Assign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     self.result_cache["Ret":cache_name] = val
     return val if self.group(mch, "output") else ""
+
+
+# region Alias
+@translator(f"""
+    (?P<alias>({"|".join(escape(l) for l in aliasutil.ALIAS)}))
+    """)
+async def Alias(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
+    """别名 Alias
+    语法：{别名}
+    """
+    logger.info(f"Alias ← {mch.groupdict()}")
+    target = aliasutil.ALIAS[self.group(mch, "alias")]
+    return await self.translate(target)
