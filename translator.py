@@ -637,7 +637,7 @@ async def Slice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     except ValueError:
         return self.breakout(mch, "[E73.36a切片参数无效]", "{d} - 切片参数无效。 (E73.36a)")
     except IndexError:
-        return self.breakout(mch, "[E73.21切片越界]", "{d} - 切片越界。 (E73.21)")
+        return self.breakout(mch, "[E73.21a索引越界]", "{d} - 索引越界。 (E73.21a)")
     logger.info(f"Slice → {ret}")
     return ret
 
@@ -1394,15 +1394,15 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     cache_name: str = await self.stegroup(mch, "cname")
     if lex_name not in lexloader.all_lexicons:
         if colname or query:
-            return self.breakout(mch, "[E43词库不存在]", f"{{d}} - 没有名为「{lex_name}」的词库。(E43)")
+            return self.breakout(mch, "[E43.1词库不存在]", f"{{d}} - 没有名为「{lex_name}」的词库。(E43.1)")
         raise PosteriorReject
     lex = await lexloader.Lexicon.load(lex_name)
 
     if self.calc_cache.get("Lex", cname := f"{lex_name}_{cache_name}") is not None:
-        ret = self.calc_cache["Lex":cname]
-        print("debug: lexret:", ret)
+        target = self.calc_cache["Lex":cname]
+        print("debug: lexret:", target)
         try:
-            ret = int(ret)
+            target = int(target)
         except ValueError:
             return self.breakout(mch, "[E73.4b填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E73.4b)")
 
@@ -1410,22 +1410,39 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         if bo := self.check_cache_name(cache_name):
             return bo(mch)
         try:
-            ret = lex.schemas.query_pop(query)
+            target = lex.schemas.query_pop(query)
+        except SyntaxError:
+            return self.breakout(
+                mch,
+                "[E43.3条件无效]",
+                f"{{d}} - Schemas「{query}」不适用于词库「{lex_name}」。 (E43.3)\n可以使用「不发 查词库 {lex_name}」以查看该词库都支持哪些Schema。",
+            )
         except Exception as e:  # noqa: BLE001
             traceback.print_exc()
             return self.breakout(mch, "[E09填词失败]", f"{{d}} - 填词失败：{e!r} (E09)")
 
-    if ret is None:
+    if target is None:
         return self.breakout(mch, "[E51填词失败]", "{d} - 没有符合条件的词。(E51)")
 
     if cache_name:
-        self.calc_cache["Lex":f"{lex_name}_{cache_name}"] = ret
+        self.calc_cache["Lex":f"{lex_name}_{cache_name}"] = target
 
-    retstr = lex[colname:ret]
+    try:
+        ret = lex[colname:target]
+    except KeyError:
+        return self.breakout(
+            mch,
+            "[E43.2列不存在]",
+            f"{{d}} - 词库「{lex_name}」没有名为「{colname}」的列。(E43.2)\n可以使用「不发 查词库 {lex_name}」以查看该词库都有哪些列。",
+        )
+    except IndexError:
+        return self.breakout(
+            mch, "[E73.21b索引越界]", f"{{d}} - 索引{target}在词库「{lex_name}」上越界。这一般是使用内部值手动指定索引导致的。(E73.21b)"
+        )
 
-    self.result_cache["Ret" : self.egroup(mch, "cname")] = retstr
-    logger.info(f"Lex → {retstr!r} debug: {self.calc_cache.caches}")
-    return retstr
+    self.result_cache["Ret" : self.egroup(mch, "cname")] = ret
+    logger.info(f"Lex → {ret!r} debug: {self.calc_cache.caches}")
+    return ret
 
 
 # region Assign

@@ -165,6 +165,32 @@ class Schemas:
                     return s[:i], s[i + 1 :]
             return s, None
 
+        # ----- deepseek写的 -----
+        def _spans_cover_all(spans: list[tuple[int, int]], length: int) -> bool:
+            if length == 0:
+                return True
+            if not spans:
+                return False
+            sorted_spans = sorted(spans)
+            merged = []
+            cur_start, cur_end = sorted_spans[0]
+            for start, end in sorted_spans[1:]:
+                if start <= cur_end:
+                    cur_end = max(cur_end, end)
+                else:
+                    merged.append((cur_start, cur_end))
+                    cur_start, cur_end = start, end
+            merged.append((cur_start, cur_end))
+
+            if merged[0][0] > 0 or merged[-1][1] < length:
+                return False
+            for i in range(len(merged) - 1):
+                if merged[i][1] < merged[i + 1][0]:
+                    return False
+            return True
+
+        # ---------------------------------------------------------------
+
         or_parts = _split_or(q)
         or_results = []
 
@@ -191,20 +217,25 @@ class Schemas:
                         raise KeyError(group_name)
                     schemas_iter = iter(self.schemas[group_name])
 
-                matched = False
                 seen_types = set()
+                all_matched_spans = []
                 for schema in schemas_iter:
                     schema_type = type(schema)
                     if schema_type in seen_types:
                         continue
                     seen_types.add(schema_type)
-                    result = schema.query(query_content)
-                    if result is not None:
-                        and_results.append(result)
-                        matched = True
+                    qret = schema.query(query_content)
+                    if qret is None:
+                        continue
+                    matched_spans, result = qret
+                    all_matched_spans.extend(matched_spans)
+                    and_results.append(result)
 
-                if not matched:
+                if not all_matched_spans:
                     raise SyntaxError(f"不合法的查询（无法被任何Schema匹配） @ {query_content}")
+
+                if not _spans_cover_all(all_matched_spans, len(query_content)):
+                    raise SyntaxError(f"不完全合法的查询（至少一个指定了的Schema未生效） @ {query_content}")
 
             if and_results:
                 or_result = and_results[0]
@@ -287,14 +318,15 @@ class SchemaABC(ABC):
     def __init__(self, cols: NamedTuple):
         self.cols = cols
 
-    def query(self, q: str) -> AwkwardLike | None:
+    def query(self, q: str) -> tuple[list[tuple[int, int]], AwkwardLike] | None:
         mchs = list(self.query_re_pat.finditer(q))
         if not mchs:
             return None
+        spans = [(m.start(), m.end()) for m in mchs]
         ret = self._query(mchs[0])
         for m in mchs[1:]:
             ret = ret & self._query(m)
-        return asAwkwardLike(ret)
+        return spans, asAwkwardLike(ret)
 
     def checkinit(self):
         # schema可以自定义checkinit检查初始化分配的列，返回False表示初始化不合法
