@@ -981,9 +981,11 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
 
-    cached_rand: list[float] | None = self.calc_cache.get("Range", f"{cache_name}_{count}", None)
+    cached_rand: list[float] | float | None = self.calc_cache.get("Range", f"{cache_name}_{count}", None)
     rng = rngs.get(rand_type, random.random)
-    rands: list[float] = [rng() for _ in range(count)] if cached_rand is None else cached_rand
+    rands: list[float] = (
+        [rng() for _ in range(count)] if cached_rand is None else ([cached_rand] if isinstance(cached_rand, (float, int)) else cached_rand)
+    )
     self.calc_cache["Range":f"{cache_name}_{count}"] = rands[0] if len(rands) == 1 else rands
 
     lit_value1, lit_value2 = (await self.tegroup(mch, "left")), (await self.tegroup(mch, "right"))
