@@ -350,11 +350,7 @@ class SPinyin(SchemaABC):
     import pinyinparser
 
     ppinst = pinyinparser.Parser(
-        pinyinparser.TOKENS.BASIC
-        | pinyinparser.TOKENS.NE
-        | pinyinparser.TOKENS.EXT
-        | pinyinparser.TOKENS.EXT_NE
-        | {"?": [0x0001, 0x0100, 0x0020]}
+        pinyinparser.TOKENS.BASIC | pinyinparser.TOKENS.NE | pinyinparser.TOKENS.EXT | pinyinparser.TOKENS.EXT_NE | pinyinparser.TOKENS.EXT2
     )
 
     wcspec_dct = {m.name: m.value for m in pinyinparser.Initial if m.name not in {"missing", "nul", "unspec"}} | {
