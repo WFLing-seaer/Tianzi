@@ -66,7 +66,7 @@ SYM_MODIFY = "@"
 SYM_LENGTH = "="
 SYM_CACHE = ">"
 
-CS_RANGE = "-－～—"  # CharSet
+CS_RANGE = "-－～"  # CharSet
 CS_SEGSEP = ";；|/"
 CS_SPLITSEP = "，、 "
 CS_SEP = "，、；？,.; \n"
