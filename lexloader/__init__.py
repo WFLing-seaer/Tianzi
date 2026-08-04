@@ -8,7 +8,7 @@ import awkward
 from anyio import Path
 from cachetools import TTLCache
 
-from . import pqload, unitutil
+from . import pathutil, pqload, unitutil
 from .colproto import ColProtoABC
 from .headparser import TColSpec
 from .schemas import Schemas
@@ -18,7 +18,7 @@ LEX_PATH = Path(__file__ or ".").parent / "lexicons"
 LOAD_CACHE: TTLCache[str, Lexicon] = TTLCache[str, "Lexicon"](32, 1800)
 
 
-all_lexicons = [p.stem for p in (pathlib.Path(__file__ or ".").parent / "lexicons").glob("*.pq")]
+all_lexicons = [pathutil.from_filename(p.stem) for p in (pathlib.Path(__file__ or ".").parent / "lexicons").glob("*.pq")]
 print(f"debug: {all_lexicons=} {__file__=} {LEX_PATH=}")
 
 
@@ -32,7 +32,7 @@ class Lexicon:
         if name not in all_lexicons:
             raise FileNotFoundError
         inst = cls.__new__(cls)
-        inst.fp = await (LEX_PATH / f"{name}.pq").absolute()
+        inst.fp = await (LEX_PATH / f"{pathutil.to_filename(name)}.pq").absolute()
         inst.name = name
 
         if name in LOAD_CACHE:
