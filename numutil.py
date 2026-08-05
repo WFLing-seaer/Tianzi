@@ -39,7 +39,7 @@ def numify(text: str, suppress_overflow: bool = False, lvl: NILVL | NSLVL | None
         lvl = {"0x": NILVL.X, "0f": NILVL.F, "0i": NILVL.I, "0r": NILVL.R, "0u": NILVL.U}.get(text[:2])
         # 语法糖。复数为0i以避免和十六进制0c混淆。注意开启语法糖会导致0xXXX的类型由N变为X。0bXXX、0oXXX不受此影响。
         if lvl is not None:
-            ntext = text[2:]
+            text = text[2:]
     ntext = normalize("NFKC", text)
     with contextlib.suppress(ValueError):
         if (lvl is None) or (lvl == NILVL.N) or (lvl == NSLVL.N):
