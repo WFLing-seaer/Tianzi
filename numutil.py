@@ -2,7 +2,7 @@ import contextlib
 from cmath import isinf, isnan
 from collections.abc import Iterable
 from enum import IntEnum, StrEnum
-from typing import Literal
+from typing import Any, Literal, cast
 from unicodedata import normalize
 
 import cn2an
@@ -92,6 +92,38 @@ def as_numeral(n: Value, _minlvl: NILVL | None = None) -> Numeral:
         return "s", "u", int(n), 6
 
 
+def as_numerals(n: Iterable[Value], _minlvl: NILVL | None = None) -> Numerals:
+    values = list(n)
+    if not values:
+        return "d", "n", [], NILVL.N
+
+    if _minlvl is not None:
+        results = [as_numeral(v, _minlvl) for v in values]
+        lvl = _minlvl
+    else:
+        default_results = [as_numeral(v) for v in values]
+        lvls = {r[3] for r in default_results}
+        if len(lvls) == 1:
+            results = default_results
+            lvl = lvls.pop()
+        else:
+            lvl = max(lvls)
+            results = [as_numeral(v, lvl) for v in values]
+
+    ftypes = {r[0] for r in results}
+    if "" in ftypes:
+        ftype = ""
+    elif "f" in ftypes:
+        ftype = "f"
+    else:
+        ftype = "d"
+
+    outmodes = {r[1] for r in results}
+    outmode = "u" if "u" in outmodes else "n"
+
+    return ftype, outmode, [r[2] for r in results], lvl
+
+
 def numsify(texts: Iterable[str], suppress_overflow: bool = False) -> Numerals:
     texts_lst = list(texts)
     default_parse = [numify(i, suppress_overflow) for i in texts_lst]
@@ -115,7 +147,30 @@ def numsify(texts: Iterable[str], suppress_overflow: bool = False) -> Numerals:
 
     lvl = max(lvls)
     nums = [numify(i, suppress_overflow, lvl) for i in texts_lst]
-    return (nums[0][0], nums[0][1], [i[2] for i in nums], lvl)
+    return (
+        (("f" if any(n[0] == "f" for n in nums) else "d") if lvl == 4 else nums[0][0]),
+        nums[0][1],
+        [i[2] for i in nums],
+        lvl,
+    )  # f特判一下因为中文可能是d也可能是f
+
+
+def numsify_any(entry: list[Any], suppress_overflow: bool = False) -> Numerals:
+    ret: list[Value | None] = [None] * len(entry)
+    nsbatch: dict[int, str] = {}
+    for idx, i in enumerate(entry):
+        if isinstance(i, Value):
+            ret[idx] = i
+        else:
+            nsbatch[idx] = str(i)
+    if not nsbatch:
+        return as_numerals(cast(list[Value], ret))
+    nums = numsify(nsbatch.values(), suppress_overflow)
+    ipols = list(nsbatch.keys())
+    for idx, i in enumerate(nums[2]):
+        ret[ipols[idx]] = i
+
+    return nums[0], nums[1], cast(list[Value], ret), nums[3]
 
 
 def numsimp(n: Value) -> Value:

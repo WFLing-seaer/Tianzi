@@ -2,6 +2,7 @@ import ast
 import asyncio
 import contextlib
 import numbers
+import operator
 import secrets
 import time
 import traceback
@@ -43,7 +44,7 @@ from regex import escape
 from . import aliasutil, lexloader, randutil
 from .cacheutil import Cache
 from .fontutil import fonts
-from .numutil import NSLVL, Value, numfmt, numify, numsify, numsimp
+from .numutil import NSLVL, Value, numfmt, numify, numsify, numsify_any, numsimp
 from .pysandbox import RETVAL_MISSING, Sandbox
 from .randutil import rngs, rsgs
 from .textutil import find_outmost_bracket
@@ -163,6 +164,8 @@ class _Stat:
 
     allow_pua_warning = True
     pua_warning: bool = False
+
+    divide_by_zero = "err"
 
 
 @runtime_checkable
@@ -678,6 +681,14 @@ async def Config(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             self.current_stat.allow_calc_big_number = True
         case "disable_calc_bignum":
             self.current_stat.allow_calc_big_number = False
+        case "divide_by_zero_as_inf" | "zinf":
+            self.current_stat.divide_by_zero = "inf"
+        case "divide_by_zero_as_nan" | "znan":
+            self.current_stat.divide_by_zero = "nan"
+        case "divide_by_zero_as_zero" | "zzero":
+            self.current_stat.divide_by_zero = "0"
+        case "divide_by_zero_as_error" | "zerr":
+            self.current_stat.divide_by_zero = "error"
         case _:
             return self.breakout(mch, "[E41配置无效]", f"{{d}} - {item} 不是有效的配置项名称。 (E41)")
 
@@ -1084,6 +1095,75 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     logger.info(f"Range → {rets}")
 
     return rets[0] if len(rets) == 1 else " ".join(map(str, rets))
+
+
+# region ReduceCalc
+@translator(f"""
+    \\#(?P<op>(\\*\\*|\\/\\/|[\\+\\-\\*\\/\\%\\&\\|\\^]))\\s?
+    (?P<main>.+?(?P<sep>[{RCS_SPLITSEP}]).+(?:(?P=sep).+)*)
+""")
+async def ReduceCalc(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
+    op = self.egroup(mch, "op")
+    segments = self.group(mch, "main").split(self.egroup(mch, "sep"))
+    segtrs = [await self.translate(self.epacse(seg)) for seg in segments]
+    try:
+        segnums = numsify_any(segtrs)
+    except ValueError:
+        return self.breakout(
+            mch,
+            "[E73.16c解析不能]",
+            f"{{d}} - 输入的「{segments}」无法被解析为同构的数值。(E73.16c)\n如果要混用异构的数值，请先用[[#...:fmt]]显式指定其格式。",
+        )
+    segvals = segnums[2]
+
+    logger.info(f"ReduceCalc ← {op=} {segments=} {segtrs=} {segvals=}")
+    if op in ("%", "//") and any(isinstance(v, complex) for v in segvals):
+        return self.breakout(mch, "[E73.38运算无效]", f"{{d}} - 复数不可进行{"取模" if op == "%" else "地板除"}。(E73.38)")
+    opfunc = {
+        "+": operator.add,
+        "-": operator.sub,
+        "*": operator.mul,
+        "/": operator.truediv,
+        "%": operator.mod,
+        "//": operator.floordiv,
+        "&": operator.and_,
+        "|": operator.or_,
+        "^": operator.xor,
+        "**": operator.pow,
+    }[op]
+    MAX_RANGE = 1 << 62
+    val = segvals[0]
+    for it in segvals[1:]:
+        if (abs(it) > MAX_RANGE) or (
+            (op == "**") and isinstance(val, int) and isinstance(it, int) and (val != 0) and (it > 0) and int(val.bit_length() * it) > 62
+        ):
+            break
+        try:
+            val = opfunc(val, it)  # type: ignore mod如果是complex的话入口就拦了，这块太大坨了不好做检查一个ignore幠上去拉倒
+            if abs(val) > MAX_RANGE:
+                break
+        except ZeroDivisionError:
+            match self.current_stat.divide_by_zero:
+                case "err":
+                    return self.breakout(mch, "[E73.27除零]", "{d} - 未指定行为的除零。 (E73.27)")
+                case "nan":
+                    val = float("nan")
+                case "inf":
+                    val = float("inf")
+                case "0":
+                    val = 0
+        except OverflowError:
+            val = float("inf")
+    else:
+        logger.info(f"ReduceCalc → {val}")
+        return val
+
+    if not self.current_stat.allow_calc_big_number:
+        return self.breakout(
+            mch, "[E73.24b数值过大]", "{d} - 计算错误：数值过大。如果需要在沙盒中重试，请指定[[config<enable_calc_bignum>]]。 (E73.24b)"
+        )
+    mock = DuckMatch({"expr": f"{"("*(len(segvals)-1)}{f"){op}".join(map(str, segvals))}"})  # 还有神必拼好代码环节说是
+    return await Calculate(self, mock)
 
 
 # region ImmediateNumbers
