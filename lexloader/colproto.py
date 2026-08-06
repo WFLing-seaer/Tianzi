@@ -658,8 +658,16 @@ class Pinyin(ColProtoABC[list[int]]):
     ):
         __p_check(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x)
 
-    def query(self, m: int | None, n: int | None, iw: Iterable[bool] | bool, fw: Iterable[bool] | bool, s: Iterable[Syllable]) -> ArrayLike:
-        print(f"m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, s={s!r}")
+    def query(
+        self,
+        m: int | None,
+        n: int | None,
+        iw: Iterable[bool] | bool,
+        fw: Iterable[bool] | bool,
+        tw: Iterable[bool] | bool,
+        s: Iterable[Syllable],
+    ) -> ArrayLike:
+        print(f"m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
         offset: ArrayLike = self.data.layout.offsets.data
         data: ArrayLike = self.data.layout.content.data
 
@@ -668,8 +676,9 @@ class Pinyin(ColProtoABC[list[int]]):
 
         iw = repeat(iw) if isinstance(iw, bool) else iw
         fw = repeat(fw) if isinstance(fw, bool) else fw
+        tw = repeat(tw) if isinstance(tw, bool) else tw
 
-        for syll, iwp, fwp in zip(s, iw, fw):
+        for syll, iwp, fwp, twp in zip(s, iw, fw, tw):
             and_val = 0
             xor_val = int(syll)
 
@@ -678,7 +687,7 @@ class Pinyin(ColProtoABC[list[int]]):
             if syll.final not in (Final.missing, Final.unspec):
                 and_val |= 0x1F00 if fwp else 0x7F00
             if syll.tone not in (Tone.missing, Tone.unspec):
-                and_val |= 0x00E0
+                and_val |= 0x00C0 if twp else 0x00E0
 
             and_lst.append(np.uint16(and_val))
             xor_lst.append(np.uint16(xor_val))

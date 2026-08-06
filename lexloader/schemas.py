@@ -359,10 +359,10 @@ class SPinyin(SchemaABC):
 
     _tokens_pat = "|".join(map(re.escape, sorted(wcspec_dct.keys(), key=len, reverse=True)))
 
-    _wcpair_pat = re.compile(__wcpair_pat_s := f"([.?/]{{2}})({_tokens_pat})")
+    _wcpair_pat = re.compile(_wcpair_pat_s := f"([.?/]{{2,3}})({_tokens_pat})")
 
     query_re_pat = re.compile(
-        rf":(((?P<asp>[./?]{{3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({__wcpair_pat_s}(?=[.?/]{{2}}))*)(?P<wcspec>[.?/]{{2}})?(?P<pinyin>[12345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
+        rf":(((?P<asp>[./?]{{3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[12345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
     )
 
     def _query(self, mch):
@@ -380,14 +380,19 @@ class SPinyin(SchemaABC):
         pinyins = self.ppinst.parse(pinyin)
 
         if not wcspec and not wcspecp:
-            return pinyinc.query(istart, iend, False, False, pinyins)
+            return pinyinc.query(istart, iend, False, False, False, pinyins)
+
+        if wcspec and len(wcspec) == 2:
+            wcspec += "."
 
         wc_pairs: list[tuple[str, str]] = self._wcpair_pat.findall(wcspecp)
+        wc_pairs = [(f"{w}." if len(w) == 2 else w, tk) for w, tk in wc_pairs]
 
         print(f"debug {wcspec=} {wc_pairs=}")
 
         iws: list[bool] = []
         fws: list[bool] = []
+        tws: list[bool] = []
         for syl in pinyins:
             wc = wcspec
             syl_i = int(syl.initial)
@@ -397,21 +402,27 @@ class SPinyin(SchemaABC):
                 if tv is not None and (syl_i == tv or syl_f == tv):
                     wc = w
                     break
+            if not wc:
+                wc = "..."
+
             iws.append(wc[0] == "?")
-            fws.append(wc[1] == "?")
             if wc[0] == "/":
                 syl.initial = self.pinyinparser.Initial.unspec
+            fws.append(wc[1] == "?")
             if wc[1] == "/":
                 syl.final = self.pinyinparser.Final.unspec
+            tws.append(wc[2] == "?")
+            if wc[2] == "/":
+                syl.tone = self.pinyinparser.Tone.unspec
 
         print(f"debug: {iws=} {fws=} {pinyins=}")
-        return pinyinc.query(istart, iend, iws, fws, pinyins)
+        return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
 
     def _query_as(self, as_, mch, pinyinc):
         as_ = as_[1:]
         asp: str = mch.group("asp")
         ri, rf, rt = (asp[0] == "/", asp[1] == "/", asp[2] == "/") if asp else (False, False, False)
-        wi, wf = (asp[0] == "?", asp[1] == "?") if asp else (False, False)
+        wi, wf, wt = (asp[0] == "?", asp[1] == "?", asp[2] == "?") if asp else (False, False, False)
 
         aspy = self.pinyinparser.parse(
             "'".join(
@@ -428,7 +439,7 @@ class SPinyin(SchemaABC):
             syl.final = self.pinyinparser.Final.unspec if rf else syl.final
             syl.tone = self.pinyinparser.Tone.unspec if rt else syl.tone
 
-        return pinyinc.query(None, None, wi, wf, aspy)
+        return pinyinc.query(None, None, wi, wf, wt, aspy)
 
 
 @schema
