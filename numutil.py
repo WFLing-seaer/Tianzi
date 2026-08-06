@@ -223,11 +223,17 @@ def numfmt(
         case "r":
             if isinstance(value, complex):
                 raise TypeError
-            ret = rn2an.an2rnA(value)
+            try:
+                ret = rn2an.an2rnA(value)
+            except ValueError as e:
+                raise OverflowError from e
         case "R":
             if isinstance(value, complex):
                 raise TypeError
-            ret = rn2an.an2rn(value)
+            try:
+                ret = rn2an.an2rn(value)
+            except ValueError as e:
+                raise OverflowError from e
         case _:
             ret = str(value)
     if fmt_spec:

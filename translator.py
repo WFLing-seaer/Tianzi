@@ -1292,6 +1292,12 @@ async def Format(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             "[E74.3b格式无效]",
             f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 不可用于格式化「{value}」（{type(value).__name__}）。(E74.3b)",
         )
+    except OverflowError as e:
+        return self.breakout(
+            mch,
+            "[E73.20数值溢出]",
+            f"{{d}} - 输入/推定的格式 {cf_fspec or "NUL"} -> {otype} 无法处理数值「{value}」（{type(value).__name__}）：{e}。(E73.20)",
+        )
 
     self.result_cache["Ret":cache_name] = ret
     logger.info(f"Format → {ret}")
