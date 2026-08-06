@@ -12,6 +12,7 @@ import numpy as np
 import pypinyin
 import pypinyin_dict.phrase_pinyin_data.large_pinyin
 import pypinyin_dict.pinyin_data.cc_cedict
+import recheck
 from cachetools import LRUCache, TTLCache, cached
 
 pypinyin_dict.phrase_pinyin_data.large_pinyin.load()
@@ -503,7 +504,6 @@ class SPath(SchemaABC):
 
 @schema
 class SPos(SchemaABC):
-
     class required_cols(NamedTuple):
         word: PlainText
 
@@ -522,3 +522,21 @@ class SPos(SchemaABC):
         ret[start:stop] = True
 
         return ret
+
+
+@schema
+class SRegex(SchemaABC):
+    class required_cols(NamedTuple):
+        word: PlainText
+
+    cols: required_cols
+
+    query_re_pat = re.compile("/(?P<regex>[^ ]+)/")
+
+    rechecker = recheck.Rechecker()
+
+    def _query(self, mch):
+        regex = mch.group("regex")
+        if (check_ret := self.rechecker.check(regex)) > (recheck.Complexity.POLYNOMIAL, 2):
+            raise MemoryError(f"正则过于复杂（{check_ret}）。")
+        return self.cols.word.query("match_substring_regex", (f"^{regex.removeprefix("^").removesuffix("$")}$",), {})
