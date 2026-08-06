@@ -799,8 +799,8 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         if not self.current_stat.allow_calc_big_number and isinstance(ieexp, simpleeval.NumberTooHigh):
             return self.breakout(
                 mch,
-                "[E73.24数值过大]",
-                "{d} - 计算错误：数值过大。如果需要在沙盒中重试，请指定[[config<enable_calc_bignum>]] (E73.24)",
+                "[E73.24a数值过大]",
+                "{d} - 计算错误：数值过大。如果需要在沙盒中重试，请指定[[config<enable_calc_bignum>]] (E73.24a)",
             )
         logger.info(f"{main} → PySB")
 
