@@ -314,6 +314,8 @@ class Tianzi:
         self._sandbox: Sandbox | None = None
         self._sandbox_finalizer: weakref.finalize | None = None
 
+        self.everything_starts: float | None = None
+
     async def get_sandbox(self) -> Sandbox:
         if self._sandbox is None:
             self._sandbox = await Sandbox.new()
@@ -333,6 +335,11 @@ class Tianzi:
 
     # 目前已占用的PUA: 0xE000-0xE07F(ASCII转义) 0xE104-0xE500(嵌套指令打包)
     async def translate(self, text: str, final: bool = False) -> SupportsStr:
+        if not self.everything_starts:
+            self.everything_starts = time.monotonic()
+        elif time.monotonic() - self.everything_starts > 1:
+            raise BreakOut("[E11] 超时。")
+
         if len(text) > 65535:
             raise BreakOut("[E60.1] 尝试转换的文本过长。输入不得大于65535字符")
 
