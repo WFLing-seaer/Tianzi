@@ -260,7 +260,11 @@ class Schemas:
             self.qcache[q] = None
             return None
         if qr is True:
-            chosen = np.random.randint(0, len(next(iter(self.cols.values())).data) - 1, self.batch_cache_size)
+            clen = len(next(iter(self.cols.values())).data)
+            if clen <= self.batch_cache_size:
+                chosen = np.arange(clen, dtype=np.int64)
+            else:
+                chosen = np.random.choice(clen, self.batch_cache_size, replace=False)
         else:
             chosen = get_k_ts(qr, self.batch_cache_size, numba.get_num_threads(), np.random.randint(0, 2147483647))
         print("debug: chosen", chosen)
