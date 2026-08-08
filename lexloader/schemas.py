@@ -363,7 +363,7 @@ class SPinyin(SchemaABC):
     _wcpair_pat = re.compile(_wcpair_pat_s := f"([.?/]{{2,3}})({_tokens_pat})")
 
     query_re_pat = re.compile(
-        rf":(((?P<asp>[./?]{{3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[12345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
+        rf":(((?P<asp>[./?]{{2,3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[12345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
     )
 
     def _query(self, mch):
@@ -422,6 +422,7 @@ class SPinyin(SchemaABC):
     def _query_as(self, as_, mch, pinyinc):
         as_ = as_[1:]
         asp: str = mch.group("asp")
+        asp = f"{asp}." if len(asp) == 2 else asp
         ri, rf, rt = (asp[0] == "/", asp[1] == "/", asp[2] == "/") if asp else (False, False, False)
         wi, wf, wt = (asp[0] == "?", asp[1] == "?", asp[2] == "?") if asp else (False, False, False)
 
