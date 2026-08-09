@@ -22,12 +22,12 @@ if __package__:
     from .colproto import ColProtoABC, Pinyin, PlainText, SortedColABC, _Int, _Length
     from .headparser import TColSpec
     from .nputil import find_first_true, get_k_ts
-    from .typing_utils import ArrayLike, AwkwardLike, asAwkwardLike
+    from .typing_utils import ArrayLike, AwkwardLike, asArrayLike
 else:
     from colproto import ColProtoABC, Pinyin, PlainText, SortedColABC, _Int, _Length
     from headparser import TColSpec
     from nputil import find_first_true, get_k_ts
-    from typing_utils import ArrayLike, AwkwardLike, asAwkwardLike
+    from typing_utils import ArrayLike, AwkwardLike, asArrayLike
 
 
 schemas = []
@@ -167,28 +167,24 @@ class Schemas:
             return s, None
 
         # ----- deepseek写的 -----
-        def _spans_cover_all(spans: list[tuple[int, int]], length: int) -> bool:
-            if length == 0:
-                return True
-            if not spans:
+        def _match_consume(s: str, group_name: str | None) -> ArrayLike | bool:
+            schemas_list = self.schemas[group_name] if group_name else list(chain.from_iterable(self.schemas.values()))
+            if not self.cols:
                 return False
-            sorted_spans = sorted(spans)
-            merged = []
-            cur_start, cur_end = sorted_spans[0]
-            for start, end in sorted_spans[1:]:
-                if start <= cur_end:
-                    cur_end = max(cur_end, end)
+            data_len = len(next(iter(self.cols.values())).data)
+            result = np.ones(data_len, dtype=bool)
+            remaining = s
+            while remaining:
+                for schema_inst in schemas_list:
+                    m = schema_inst.match(remaining)
+                    if m is not None:
+                        part_result = schema_inst.query(m)
+                        result = result & part_result
+                        remaining = remaining[m.end() :]
+                        break
                 else:
-                    merged.append((cur_start, cur_end))
-                    cur_start, cur_end = start, end
-            merged.append((cur_start, cur_end))
-
-            if merged[0][0] > 0 or merged[-1][1] < length:
-                return False
-            for i in range(len(merged) - 1):
-                if merged[i][1] < merged[i + 1][0]:
-                    return False
-            return True
+                    raise SyntaxError(f"不合法的查询 @ {remaining}")
+            return asArrayLike(result)
 
         # ---------------------------------------------------------------
 
@@ -211,38 +207,28 @@ class Schemas:
                 if group_name is not None:
                     group_name = group_name.strip()
 
-                if group_name is None:
-                    schemas_iter = chain.from_iterable(self.schemas.values())
-                else:
-                    if group_name not in self.schemas:
-                        raise KeyError(group_name)
-                    schemas_iter = iter(self.schemas[group_name])
+                result = _match_consume(query_content, group_name)
 
-                seen_types = set()
-                all_matched_spans = []
-                for schema in schemas_iter:
-                    schema_type = type(schema)
-                    if schema_type in seen_types:
-                        continue
-                    seen_types.add(schema_type)
-                    qret = schema.query(query_content)
-                    if qret is None:
-                        continue
-                    matched_spans, result = qret
-                    all_matched_spans.extend(matched_spans)
-                    and_results.append(result)
+                if neg_query:
+                    result = (not result) if isinstance(result, bool) else ~result  # type: ignore 每日一骂啥比awkward 但凡写点类型注解我也不至于沦落到弄一堆arraylike之类的玩意然后type:ignore满天飞了
 
-                if not all_matched_spans:
-                    raise SyntaxError(f"不合法的查询（无法被任何Schema匹配） @ {query_content}")
+                and_results.append(result)
 
-                if not _spans_cover_all(all_matched_spans, len(query_content)):
-                    raise SyntaxError(f"不完全合法的查询（至少一个指定了的Schema未生效） @ {query_content}")
-
+            if any(x is False for x in and_results):  # in会触发__bool__然后抛错，谁知道为啥
+                continue  # 有False整坨为假那也不用再过后续了
+            all_true = bool(and_results)
+            and_results = [r for r in and_results if r is not True]  # True就没必要and了我说
             if and_results:
                 or_result = and_results[0]
                 for r in and_results[1:]:
-                    or_result = or_result & ((~r) if neg_query else r)
+                    or_result = or_result & r
                 or_results.append(or_result)
+            elif all_true:
+                or_results.append(True)
+
+        if any(x is True for x in or_results):
+            return True
+        or_results = [r for r in or_results if r is not False]
 
         if or_results:
             result = or_results[0]
@@ -323,22 +309,15 @@ class SchemaABC(ABC):
     def __init__(self, cols: NamedTuple):
         self.cols = cols
 
-    def query(self, q: str) -> tuple[list[tuple[int, int]], AwkwardLike] | None:
-        mchs = list(self.query_re_pat.finditer(q))
-        if not mchs:
-            return None
-        spans = [(m.start(), m.end()) for m in mchs]
-        ret = self._query(mchs[0])
-        for m in mchs[1:]:
-            ret = ret & self._query(m)
-        return spans, asAwkwardLike(ret)
+    def match(self, s: str) -> re.Match | None:
+        return self.query_re_pat.match(s)
 
     def checkinit(self):
         # schema可以自定义checkinit检查初始化分配的列，返回False表示初始化不合法
         return True
 
     @abstractmethod
-    def _query(self, mch: re.Match) -> AwkwardLike: ...
+    def query(self, mch: re.Match) -> AwkwardLike: ...
 
 
 # region Schema s
@@ -370,7 +349,7 @@ class SPinyin(SchemaABC):
         rf":(((?P<asp>[./?]{{2,3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[12345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
     )
 
-    def _query(self, mch):
+    def query(self, mch):
         pinyinc = self.cols.pinyin
 
         if as_ := mch.group("as"):
@@ -461,7 +440,7 @@ class SWordLength(SchemaABC):
     def checkinit(self):
         return (self.cols.word is not None) or (self.cols.length is not None)  # 二者都是可选但二者至少有其一
 
-    def _query(self, mch):
+    def query(self, mch):
         l = int(mch.group("l"))
         o = mch.group("o")
         if self.cols.length is not None:
@@ -494,7 +473,7 @@ class SPath(SchemaABC):
 
     query_re_pat = re.compile("/(?P<path>[^ ]+)/\\*")
 
-    def _query(self, mch):
+    def query(self, mch):
         path = mch.group("path").split("/")
         if not any(path):
             return self.cols.parent.query("eq", 0)
@@ -516,7 +495,7 @@ class SPos(SchemaABC):
 
     query_re_pat = re.compile("#(?P<start>[0-9]+)?\\.\\.(?P<stop>[0-9]+)?")
 
-    def _query(self, mch):
+    def query(self, mch):
         _start = mch.group("start")
         _stop = mch.group("stop")
 
@@ -540,7 +519,7 @@ class SRegex(SchemaABC):
 
     rechecker = recheck.Rechecker()
 
-    def _query(self, mch):
+    def query(self, mch):
         regex = mch.group("regex")
         if (check_ret := self.rechecker.check(regex)) > (recheck.Complexity.POLYNOMIAL, 2):
             raise MemoryError(f"正则过于复杂（{check_ret}）。")
