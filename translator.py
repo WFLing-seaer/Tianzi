@@ -198,8 +198,6 @@ randutil.set_nrandom(nrandom)
 
 logger = getLogger("translators")
 
-EPACSE = {n: n - 0xE000 for n in range(0xE000, 0xE080)}
-
 # endregion
 
 # region global vars
@@ -316,6 +314,20 @@ class Tianzi:
 
         self.everything_starts: float | None = None
 
+        self.escape_chr_it: Iterator[str] = map(chr, range(0xE000, 0xE07F))
+        self.escaped: dict[str, str] = {}
+
+    def _get_escape_for(self, s: str):
+        try:
+            esc = next(self.escape_chr_it)
+        except StopIteration:
+            raise PUACharDrained
+        self.escaped[esc] = s
+        return esc
+
+    def _get_epacse_for(self, e: str):
+        return "".join(self.escaped.get(c, c) for c in e)
+
     async def get_sandbox(self) -> Sandbox:
         if self._sandbox is None:
             self._sandbox = await Sandbox.new()
@@ -333,7 +345,7 @@ class Tianzi:
 
         return self._sandbox
 
-    # 目前已占用的PUA: 0xE000-0xE07F(ASCII转义) 0xE104-0xE500(嵌套指令打包)
+    # 目前已占用的PUA: 0xE000-0xE07F(转义) 0xE104-0xE500(嵌套指令打包)
     async def translate(self, text: str, final: bool = False) -> SupportsStr:
         if not self.everything_starts:
             self.everything_starts = time.monotonic()
@@ -350,7 +362,11 @@ class Tianzi:
 
         logger.info(f"TRANSLATE {text} ↓↓↓")
 
-        text = regex.sub("\\\\([\x00-\x7f])", lambda m: chr(ord(m.group(1)) + 0xE000), text)
+        self.escape_chr_it = iter(map(chr, range(0xE000, 0xE07F)))
+        self.escaped.clear()
+        # 因为epacse里还要用这个所以扔到实例作用域去了
+
+        text = regex.sub("\\\\(\\\\*.)", lambda m: self._get_escape_for(m.group(1)), text)
 
         fields_index: list[tuple[int, int]] = find_outmost_bracket((SYM_HEAD, SYM_TAIL), text)
         fields: deque[SupportsStr] = deque(text[i + len(SYM_HEAD) : j - len(SYM_TAIL)] for i, j in fields_index)
@@ -493,7 +509,7 @@ class Tianzi:
         ret = "".join(text_lst)
 
         if isinstance(ret, str):
-            ret = ret.translate(EPACSE)
+            ret = self._get_epacse_for(ret)
         logger.info(f"TRANSLATE {text} → {ret} ↑↑↑")
 
         if final:
@@ -518,7 +534,7 @@ class Tianzi:
     def epacse(self, s: str):
         for c, r in self.nested_inline_epacse.items():
             s = s.replace(c, r)
-        return s.translate(EPACSE)
+        return self._get_epacse_for(s)
 
     async def tegroup(self, mch: SupportsGroup, group: str | int) -> SupportsStr:
         return await self.translate(self.egroup(mch, group))
