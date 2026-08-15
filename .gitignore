@@ -3,7 +3,6 @@ __pycache__/
 *.nb[ci]
 .vscode/
 legacy.7z
-lexicons/
 *.md
 !README.md
 !LICENSE
@@ -11,3 +10,12 @@ lexicons/
 lexloader/lexicons/*
 !lexloader/lexicons/.gitkeep
 !docs/*
+
+# 自动生成的
+docs/手册.html
+
+# 神必小工具
+lexloader/lvorylexcompile.py
+
+#这个现在还没有但是之后打算加
+db/
