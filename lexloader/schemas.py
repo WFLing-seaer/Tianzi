@@ -346,7 +346,7 @@ class SPinyin(SchemaABC):
     _wcpair_pat = re.compile(_wcpair_pat_s := f"([.?/]{{2,3}})({_tokens_pat})")
 
     query_re_pat = re.compile(
-        rf":(((?P<asp>[./?]{{2,3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[12345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
+        rf":(((?P<asp>[./?]{{2,3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[012345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
     )
 
     def query(self, mch):
