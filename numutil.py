@@ -235,7 +235,6 @@ def numfmt(
             except ValueError as e:
                 raise OverflowError from e
         case _:
-            ret = str(value)
-    if fmt_spec:
-        ret = f"{{v:{fmt_spec}}}".format(v=value)
-    return ret
+            ret = value
+            fmt_spec = fmt_spec or ftype
+    return f"{{v:{fmt_spec}}}".format(v=ret) if fmt_spec else str(ret)
