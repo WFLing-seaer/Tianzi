@@ -13,12 +13,16 @@ import pinyinparser
 import regex
 
 # Aha
-from core.api import API
-from core.dispatcher import on_cleanup, on_message, on_notice
-from fuzzywuzzy import process
-from models import api
-from models.msg import Forward, MessageChain, MsgChain, Node, Text
-from utils.string import InlineStr
+from core.api import API  # type: ignore
+from core.dispatcher import (  # type: ignore
+    on_cleanup,
+    on_message,
+    on_notice,
+)
+from models import api  # type: ignore
+from models.msg import Forward, MessageChain, MsgChain, Node, Text  # type: ignore
+from thefuzz import process
+from utils.string import InlineStr  # type: ignore
 
 from . import lexloader, translator
 from .censor import censor
@@ -36,14 +40,16 @@ OTHER_BOT_QQ = {
     "3635837386": 1,  # Lvory
     "3402897586": 2,
     "3498314126": 2,  # 豆鸽
-    "3889854671": 3,  # 海狶
+    "3889854671": 3,  # 海狶（官机）
     "1825412879": 4,  # 势孙綝
+    "3889001741": 5,  # 小小（Lilac bot群官机）
+    "3889001246": 6,  # 幽幽子（Lilac bot群官机）
 }
 OTHER_BOT_RE = {
     re.compile("发 填字[\\s\\S]+"): 1,
     re.compile("(回e)[\\s\\S]+"): 2,
-    re.compile(".+"): 3,  # 任何消息都会触发海狶
-    re.compile("(说|echo|飞).+"): 4,
+    re.compile("(说|echo|飞|e) .+"): 4,
+    re.compile(".+"): 0,  # 官机通用触发
 }
 last_cross_bot_interact: deque[set[int]] = deque(maxlen=36)
 last_fuse_time = 0
@@ -71,7 +77,7 @@ async def tianzi_core(
     except TimeoutError:
         translated = "正则超时。您的输入可能太长或太复杂。"
     except Exception as e:
-        translated = f"意外的错误：{repr(e)}，栈如下：\n{traceback.format_exc()}\n请联系找北。"
+        translated = f"意外的错误：{e!r}，栈如下：\n{traceback.format_exc()}\n请联系找北。"
     if last_tz.current_stat.censor:
         translated = censor(translated)
     ret_msg = regex.sub(CRASHACTER, lambda char: f"U+{hex(ord(char.group(0)))[2:].upper()}", translated.removeprefix("\n").removeprefix(" "))
@@ -219,18 +225,18 @@ async def get_lex_meta(event: api.Message):
     if name := event.message_str[6:].lstrip():
         try:
             meta = await (await lexloader.Lexicon.load(name)).fmt_metadata()
-        except KeyError:
-            fuzz = cast(list[tuple[str, int]], process.extract(name, lexloader.all_lexicons, limit=2))
+        except FileNotFoundError:
+            fuzz = cast(list[tuple[str, int]], process.extract(name, lexloader.all_lexicons, limit=4))
+            contain = [lex for lex in lexloader.all_lexicons if name in lex]
             if fuzz and fuzz[0][1] >= 70:
-                if len(fuzz) == 2 and fuzz[1][1] == fuzz[0][1]:
-                    hint = f"猜你想找：「{fuzz[0][0]}」「{fuzz[1][0]}」"
-                else:
-                    hint = f"猜你想找：「{fuzz[0][0]}」"
+                hint = f"猜你想找：{"".join(f"「{ct}」" for ct in contain[:10])}{f"（以及其他{len(contain)-10}个名称中包含该关键词的词库）" if len(contain) > 10 else ''}{"".join(f"「{fz[0]}」" for fz in fuzz)}"
             else:
                 hint = ""
             meta = f"词库不存在。{hint}"
         await event.send(meta)
     else:
+        await event.send("由于一些问题，无参查词库会导致Aha整个挂起，因此本功能已被禁用，敬请谅解")
+        return
         names = lexloader.all_lexicons
         namesegs = [
             Node(nickname=f"词典{i+1}~{i+50}", content=MessageChain(Text(text="\n".join(names[i : i + 50])))) for i in range(0, len(names), 50)
@@ -238,16 +244,36 @@ async def get_lex_meta(event: api.Message):
         await event.send(Forward(content=MsgChain(namesegs)))
 
 
-"""@on_message("不发 查词 .+")
+@on_message("不发 查词 .+")
 async def find_lex(event: api.Message):
     word = event.message_str[6:].strip()
-    lexs = await lexloaders.LexLoader.search_word(word)
-    if not lexs:
-        ret = f"{word} - 不见于任何词典"
-    else:
-        lex_names = [lex.meta.name for lex in lexs]
-        ret = f"{word} - 见于以下{len(lexs)}个词典：「{"」「".join(lex_names)}」"
-    await event.send(ret)"""
+    mch = re.fullmatch(
+        f"""(?P<lex>({"|".join(re.escape(l) for l in lexloader.all_lexicons)}))(\\.(?P<colname>[^\\(]+?))?(\\{{(?P<query>.+?)\\}})?""", word
+    )
+    if not mch:
+        await event.send("查词格式错误：应使用和填字一致的「词库.列{条件}」语法。当然也可能是没这个词库")
+        return
+    query = mch["query"]
+    if not query:
+        await event.send(
+            "不建议使用不带参的查询，因为可能会把词库里一些不和谐的词炸出来。如果确实想不带参查词（也就是查看词库所有词），请使用{我确实就是要不带参查词}作为查询字段。"
+        )
+        return
+    if query == "我确实就是要不带参查词":
+        query = ""
+    lex = await lexloader.Lexicon.load(mch["lex"])
+    colname = mch["colname"] or None
+    col = lex.schemas.get_col(colname)
+    pos = lex.schemas.query_some(query)
+    if pos is None:
+        await event.send("<空>")
+        return
+    ret = " ".join(col.tostr(col.data[m]) for m in pos)
+    if len(ret) > 4000:
+        ret = f"{ret[:4000]}\n以下省略{len(ret) - 4000}字"
+    ret += "\n（以及更多结果……）" if len(pos) == 256 else f"\n（总计{len(pos)}个结果）"
+    logger.info(f"查词 {ret!r}")
+    await event.send(censor(ret))
 
 
 @on_message("不发 拼解 .+")
@@ -277,7 +303,7 @@ async def geyue_cipher(event: api.Message):
     pad = 3 - (len(ciphered)) % 3  # 用最后一个字符标识pad了多长以及使用的顺序，因此pad长度是1/2/3而不是0/1/2（也就是一定会有pad）
     padchar = GY_CHARSET[pad - 1 + orig_used * 3]
     ciphered += "".join(random.choices(GY_CHARSET, k=pad - 1)) + padchar
-    await event.send("！".join((ciphered[i : i + 3] for i in range(0, len(ciphered), 3))) + "！")
+    await event.send("！".join(ciphered[i : i + 3] for i in range(0, len(ciphered), 3)) + "！")
 
 
 @on_message("不发 鸽曰\\- .+")
@@ -295,7 +321,7 @@ async def geyue_decipher(event: api.Message):
             await event.send("压缩炸弹是吧😡👊")
             return
         await event.send(deciphered)
-    except Exception:
+    except Exception:  # noqa: BLE001
         await event.send("咕咕嘎嘎的说什么呢，听不懂")
 
 
