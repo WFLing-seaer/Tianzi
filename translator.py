@@ -65,6 +65,7 @@ SYM_HEAD = "[["
 SYM_TAIL = "]]"
 SYM_MODIFY = "@"
 SYM_LENGTH = "="
+SYM_REF = "<"
 SYM_CACHE = ">"
 
 CS_RANGE = "-－～"  # CharSet
@@ -80,7 +81,7 @@ SYN_CALC = "="
 SYN_IVA = ">>"
 SYN_IVR = "<<"
 SYN_IVFIELD = ":"
-SYN_REF = "<"  # 没有SYN_ASSIGN，用的是SYM_CACHE
+# 没有SYN_ASSIGN，用的是SYM_CACHE；SYN_REF用SYM_REF
 SYN_FONT = ":"
 SYN_IN = "#"
 SYN_REPEAT = "*"
@@ -94,6 +95,7 @@ RSYM_TAIL = escape(SYM_TAIL)
 RSYM_MODIFY = escape(SYM_MODIFY)
 RSYM_LENGTH = escape(SYM_LENGTH)
 RSYM_CACHE = escape(SYM_CACHE)
+RSYM_REF = escape(SYM_REF)
 RCS_RANGE = escape(CS_RANGE)
 RCS_SEGSEP = escape(CS_SEGSEP)
 RCS_SPLITSEP = escape(CS_SPLITSEP)
@@ -105,7 +107,6 @@ RSYN_CALC = escape(SYN_CALC)
 RSYN_IVA = escape(SYN_IVA)
 RSYN_IVR = escape(SYN_IVR)
 RSYN_IVFIELD = escape(SYN_IVFIELD)
-RSYN_REF = escape(SYN_REF)
 RSYN_FONT = escape(SYN_FONT)
 RSYN_IN = escape(SYN_IN)
 RSYN_REPEAT = escape(SYN_REPEAT)
@@ -885,7 +886,7 @@ async def InnerValRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region Reference
-@translator(f"{RSYN_REF}(?P<cname>.+)")
+@translator(f"{RSYM_REF}(?P<cname>.+)")
 async def Reference(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """引用 「Reference」
     语法：<{缓存名}"""
@@ -928,6 +929,9 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (?P<font>[^{RSYM_TAIL}{RCS_SEP}{RCS_SEGSEP}]+?)
     ({RSYM_MODIFY}
         (?P<charset>.+?)
+    )?
+    (\\s?{RSYM_REF}
+        (?P<rname>.+?)
     )?
     (\\s?{RSYM_CACHE}
         (?P<cname>.+?)
@@ -992,13 +996,16 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         (\\s?{RSYM_MODIFY}
             (?P<rand>({"|".join(map(escape,rngs.names))}))
         )?
+        (\\s?{RSYM_REF}
+            (?P<rname>.+?)
+        )?
         (\\s?[{RSYM_CACHE}]
             (?P<cname>.+?)
         )?
         (\\s?{RSYM_LENGTH}
             (?P<count>.+?)
         )?
-    ){{4}}""")
+    ){{5}}""")
 async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """随机数 「Range」
     语法：{下界}-{上界}[:[{Python式格式};]{转换格式}][@{分布}][>{缓存名}]"""
@@ -1006,6 +1013,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     logger.info(f"Range ← {mch.groupdict()}")
 
     cache_name: str = await self.stegroup(mch, "cname")
+    rcache_name: str = await self.stegroup(mch, "rname")
     rand_type: str = await self.stegroup(mch, "rand")
     try:
         count: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
@@ -1016,12 +1024,13 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         return bo(mch)
 
     rng = rngs.get(rand_type, random.random)
-    if cache_name:
-        cached_rand: list[float] | float | None = self.calc_cache.get("Range", f"{cache_name}_{count}", None)
+    if rcache_name:
+        cached_rand: list[float] | float | None = self.calc_cache.get("Range", f"{rcache_name}_{count}", None)
         rands: list[float] = (
             [rng() for _ in range(count)] if cached_rand is None else ([cached_rand] if isinstance(cached_rand, (float, int)) else cached_rand)
         )
-        self.calc_cache["Range":f"{cache_name}_{count}"] = rands[0] if len(rands) == 1 else rands
+        if cache_name:
+            self.calc_cache["Range":f"{cache_name}_{count}"] = rands[0] if len(rands) == 1 else rands
     else:
         rands: list[float] = [rng() for _ in range(count)]
 
@@ -1258,6 +1267,9 @@ async def ImmediateNumbers(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             (?P<fusr>(cn|CN|u|U|unicode|ro|RO))
         )?
     )
+    (\\s?{RSYM_REF}
+        (?P<rname>.+?)
+    )?
     (\\s?[{RSYM_CACHE}]
         (?P<cname>.+?)
     )?
@@ -1409,6 +1421,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (?P<main>[^>=]+?(?P<sep>[{RCS_SPLITSEP}])[^>=]+(?:(?P=sep)[^>=]+)*)
     (
         (\\s?{RSYM_MODIFY} (?P<rand>({"|".join(rsgs.names)})) )?
+        (\\s?{RSYM_REF} (?P<rname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
         (\\s?{RSYM_CACHE} (?P<cname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
         (\\s?{RSYM_LENGTH} (?P<count>.+?) )?
     ){{3}}
@@ -1418,6 +1431,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """选择 「Choice」 语法：{选项1} {选项2} {选项3}...[>{缓存名}][@{分布}][={选择数}]"""
     logger.info(f"Choice ← {mch.groupdict()}")
     cache_name: str = await self.stegroup(mch, "cname")
+    rcache_name: str = await self.stegroup(mch, "rname")
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
     try:
@@ -1439,13 +1453,13 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if count > len(splitted):
         replace = True
 
-    _cache_name = f"{cache_name}_{count}"
+    _rcache_name = f"{rcache_name}_{count}"
 
     weights = None
-    if cache_name:
-        weights: list[float] | None = self.calc_cache.get("Choice", _cache_name)
+    if rcache_name:
+        weights: list[float] | None = self.calc_cache.get("Choice", _rcache_name)
         if weights is None:
-            _rand: float | list[float] | None = self.calc_cache.get("Range", _cache_name)
+            _rand: float | list[float] | None = self.calc_cache.get("Range", _rcache_name)
             weights = [0.0] * len(splitted)
             if isinstance(_rand, float):
                 weights[int(_rand * len(splitted))] = 1.0
@@ -1478,7 +1492,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     weights = [w / swght for w in weights]
 
     if cache_name:
-        self.calc_cache["Choice":_cache_name] = weights
+        self.calc_cache["Choice":f"{cache_name}_{count}"] = weights
 
     chosens: list[str] = list(nrandom.choice(options, count, replace, weights))
     chosens = [str(await self.translate(opt)) for opt in chosens]
@@ -1493,6 +1507,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (?P<lex>({"|".join(escape(l) for l in lexloader.all_lexicons)}))
     (\\.(?P<colname>[^\\({RSYM_CACHE}]+?))?
     (\\{{(?P<query>.+?)\\}})?
+    ({RSYM_REF}(?P<rname>.+))?
     ({RSYM_CACHE}(?P<cname>.+))?
     """)
 async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
@@ -1504,13 +1519,14 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     colname: str = await self.stegroup(mch, "colname")
     query: str = await self.stegroup(mch, "query")
     cache_name: str = await self.stegroup(mch, "cname")
+    rcache_name: str = await self.stegroup(mch, "rname")
     if lex_name not in lexloader.all_lexicons:
         if colname or query:
             return self.breakout(mch, "[E43.1词库不存在]", f"{{d}} - 没有名为「{lex_name}」的词库。(E43.1)")
         raise PosteriorReject
     lex = await lexloader.Lexicon.load(lex_name)
 
-    if self.calc_cache.get("Lex", cname := f"{lex_name}_{cache_name}") is not None:
+    if self.calc_cache.get("Lex", cname := f"{lex_name}_{rcache_name}") is not None:
         target = self.calc_cache["Lex":cname]
         print("debug: lexret:", target)
         try:
@@ -1552,7 +1568,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             mch, "[E73.21b索引越界]", f"{{d}} - 索引{target}在词库「{lex_name}」上越界。这一般是使用内部值手动指定索引导致的。(E73.21b)"
         )
 
-    self.result_cache["Ret" : self.egroup(mch, "cname")] = ret
+    self.result_cache["Ret":cache_name] = ret
     logger.info(f"Lex → {ret!r} debug: {self.calc_cache.caches}")
     return ret
 
