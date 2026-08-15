@@ -363,9 +363,7 @@ class Tianzi:
 
         logger.info(f"TRANSLATE {text} ↓↓↓")
 
-        self.escape_chr_it = iter(map(chr, range(0xE000, 0xE07F)))
-        self.escaped.clear()
-        # 因为epacse里还要用这个所以扔到实例作用域去了
+        # 原来这有个clear epacse但是疑似会导致问题所以删了算了喵
 
         text = regex.sub("\\\\(\\\\*.)", lambda m: self._get_escape_for(m.group(1)), text)
 
@@ -1055,10 +1053,11 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             return self.breakout(mch, "[E83尚未支持]", "{d} - 尚不支持在分布上进行无界随机，还望谅解。(E83)")
         return self.breakout(mch, "[E73.33边界无效]", "{d} - 边界不可以是Inf或NaN。(E73.12)")
     except ValueError:
+        err = (mch, "[E73.13非数值]", f"{{d}} - 输入的边界「{lit_value1}」「{lit_value2}」无法被解析为范围。(E73.13)")
         if self.egroup(mch, "sep") == "-":
             # 一般是带有负数的choice被识别成Range了，此时抛个后验拒绝让choice能吃到
-            raise PosteriorReject
-        return self.breakout(mch, "[E73.13非数值]", f"{{d}} - 输入的边界「{lit_value1}」「{lit_value2}」无法被解析为范围。(E73.13)")
+            raise PosteriorReject(*err)
+        return self.breakout(*err)
 
     c_ftype: str = self.egroup(mch, "ftype")
     c_otype: str = self.egroup(mch, "fusr")
@@ -1095,7 +1094,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     rets: list[str | Value] = []
 
     for chosen in chosens:
-        if cf_fspec or (otype not in ("n", "nul")):
+        if cf_fspec or (otype != "nul"):
             try:
                 ret: str | Value = numfmt(
                     fusr_to_nfmt_fmt(otype),
@@ -1418,13 +1417,13 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 # region Choice
 @translator(f"""
-    (?P<main>[^>=]+?(?P<sep>[{RCS_SPLITSEP}])[^>=]+(?:(?P=sep)[^>=]+)*)
+    (?P<main>(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+?(?P<sep>[{RCS_SPLITSEP}])(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+(?:(?P=sep)(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+)*)
     (
         (\\s?{RSYM_MODIFY} (?P<rand>({"|".join(rsgs.names)})) )?
         (\\s?{RSYM_REF} (?P<rname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
         (\\s?{RSYM_CACHE} (?P<cname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
         (\\s?{RSYM_LENGTH} (?P<count>.+?) )?
-    ){{3}}
+    ){{4}}
     (?P<replace>\\.\\.\\.)?
 """)
 async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
