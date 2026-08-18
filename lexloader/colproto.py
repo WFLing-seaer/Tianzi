@@ -667,7 +667,7 @@ class Pinyin(ColProtoABC[list[int]]):
         tw: Iterable[bool] | bool,
         s: Iterable[Syllable],
     ) -> ArrayLike:
-        print(f"m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
+        logger.info(f"CPinyin query m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
         offset: ArrayLike = self.data.layout.offsets.data
         data: ArrayLike = self.data.layout.content.data
 
@@ -692,7 +692,7 @@ class Pinyin(ColProtoABC[list[int]]):
             and_lst.append(np.uint16(and_val))
             xor_lst.append(np.uint16(xor_val))
 
-        print(f"{and_lst=} {xor_lst=}")
+        logger.info(f"CPinyin query and={and_lst!r} xor={xor_lst!r}")
 
         and_np = np.array(and_lst, dtype=np.uint16)
         xand_np = np.array(xor_lst, dtype=np.uint16) & and_np

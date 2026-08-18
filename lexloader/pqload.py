@@ -1,3 +1,5 @@
+import logging
+
 import awkward as ak
 from frozendict import frozendict
 
@@ -7,6 +9,8 @@ try:
 except ModuleNotFoundError, ImportError:
     from colproto import JIT_NAMES, PROTO_NAMES, ColProtoABC
     from headparser import ColSpec, FrozenGroup, TFrozenColSpec, THeadN, runtime_parse
+
+logger = logging.getLogger(__name__)
 
 
 def load(record_array: ak.Array) -> dict[TFrozenColSpec, ColProtoABC]:
@@ -28,6 +32,10 @@ def load(record_array: ak.Array) -> dict[TFrozenColSpec, ColProtoABC]:
         if main_proto_cls is None:
             raise ValueError(f"未知的协议类型: {main_colspec.proto} (列: {col_name})")
 
+        logger.info(
+            f"列 {col_name!r} → main {main_colspec.name}.{main_colspec.proto} (组 {"; ".join(f"{k}={'|'.join(sorted(v)) if v else '*'}" for k, v in main_group.items()) or "-"}) JIT [{", ".join(f"{j.name}.{j.proto}" for j in head.jit) or "-"}]"
+        )
+
         main_col: ColProtoABC = main_proto_cls(data=record_array[col_name])
         result[main_colspec] = main_col
 
@@ -48,4 +56,5 @@ def load(record_array: ak.Array) -> dict[TFrozenColSpec, ColProtoABC]:
             jit_col = jit_cls(from_=main_col)
             result[jit_colspec] = jit_col
 
+    logger.info(f"cols loaded: {len(result)}")
     return result

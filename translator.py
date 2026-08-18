@@ -468,6 +468,7 @@ class Tianzi:
                     self.nested_inline_epacse = NIEPACSE_backup
                     continue
                 except PosteriorReject:
+                    logger.info(f"PR @ cached {pcache_key=}")
                     self.call_stack.pop(-1)
 
             pr_message = None
@@ -486,6 +487,7 @@ class Tianzi:
                         break
                     except PosteriorReject as pr:
                         pr_message = pr.args
+                        logger.info(f"PR @ {fun.__name__} {pcache_key=} msg={pr_message}")
                         self.call_stack.pop()
                         continue
             else:
@@ -757,7 +759,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         for field, names in self.calc_cache.caches.items()
     }
 
-    print(f"debug: {cache_vars!r} {inner_cache_vars!r}")
+    logger.info(f"Calc: FFS cache: {cache_vars!r} {inner_cache_vars!r}")
 
     class FFSEval(simpleeval.SimpleEval):
         @staticmethod
@@ -1527,7 +1529,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     if self.calc_cache.get("Lex", cname := f"{lex_name}_{rcache_name}") is not None:
         target = self.calc_cache["Lex":cname]
-        print("debug: lexret:", target)
+        logger.info(f"Lex: lexret: {target}")
         try:
             target = int(target)
         except ValueError:

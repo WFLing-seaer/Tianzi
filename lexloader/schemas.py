@@ -1,5 +1,7 @@
 import inspect
+import logging
 import re
+import time
 import types
 import typing
 from abc import ABC, abstractmethod
@@ -28,6 +30,8 @@ else:
     from headparser import TColSpec
     from nputil import find_first_true, get_k_ts
     from typing_utils import ArrayLike, AwkwardLike, asArrayLike
+
+logger = logging.getLogger(__name__)
 
 
 schemas = []
@@ -111,9 +115,21 @@ class Schemas:
 
         self.schemas = {gname: [s for s in (scmatch(sc, cols) for sc in schemas) if s is not None] for gname, cols in group_cols.items()}
 
+        for gname, gschemas in self.schemas.items():
+            if not gschemas:
+                logger.info(f"组 {gname!r} : N/A")
+                continue
+            for s in gschemas:
+                cols = ", ".join(f"{f}={type(getattr(s.cols, f)).__name__}" for f in s.cols._fields if getattr(s.cols, f) is not None)
+                logger.info(f"组 {gname!r} : {type(s).__name__} ({cols})")
+
     def query(self, q: str) -> ArrayLike | bool:
         if not q:
+            logger.info("<空query>")
             return True
+
+        logger.info(f"query: {q!r}")
+        q_t0 = time.perf_counter()
 
         def _split_or(s: str) -> list[str]:  # 这三个其实按理来说可以复用textutil，但是由于沟槽的相对导入我宁可重写一遍（似了
             parts = []
@@ -174,25 +190,37 @@ class Schemas:
             data_len = len(next(iter(self.cols.values())).data)
             result = np.ones(data_len, dtype=bool)
             remaining = s
+            logger.info(f"match_consume gname={group_name!r} schemas={[type(sc).__name__ for sc in schemas_list]}")
             while remaining:
                 for schema_inst in schemas_list:
+                    t0 = time.perf_counter()
                     m = schema_inst.match(remaining)
+                    tm = (time.perf_counter() - t0) * 1000
                     if m is not None:
+                        t1 = time.perf_counter()
                         part_result = schema_inst.query(m)
+                        tq = (time.perf_counter() - t1) * 1000
                         result = result & part_result
                         remaining = remaining[m.end() :]
+                        logger.info(
+                            f"match_consume : {type(schema_inst).__name__} → {m.group(0)!r} gd={ {k: v for k, v in (m.groupdict() or {}).items() if v}!r}"
+                            f"match_consume {tm:.2f}ms query {tq:.2f}ms → {remaining!r}"
+                        )
                         break
                 else:
                     raise SyntaxError(f"不合法的查询 @ {remaining}")
+            logger.info(f"match_consume : gname={group_name!r} ok")
             return asArrayLike(result)
 
         # ---------------------------------------------------------------
 
         or_parts = _split_or(q)
+        logger.info(f"split or {or_parts!r}")
         or_results = []
 
         for or_part in or_parts:
             and_queries = _split_and(or_part)
+            logger.info(f"split and {or_part!r} → {and_queries!r}")
             and_results = []
 
             for query_str in and_queries:
@@ -207,14 +235,19 @@ class Schemas:
                 if group_name is not None:
                     group_name = group_name.strip()
 
+                logger.info(f"neg={neg_query} gname={group_name!r} content={query_content!r}")
+                t0 = time.perf_counter()
                 result = _match_consume(query_content, group_name)
+                dt = (time.perf_counter() - t0) * 1000
 
                 if neg_query:
                     result = (not result) if isinstance(result, bool) else ~result  # type: ignore 每日一骂啥比awkward 但凡写点类型注解我也不至于沦落到弄一堆arraylike之类的玩意然后type:ignore满天飞了
 
+                logger.info(f"and seg ok {dt:.1f}ms")
                 and_results.append(result)
 
             if any(x is False for x in and_results):  # in会触发__bool__然后抛错，谁知道为啥
+                logger.info("and skip")
                 continue  # 有False整坨为假那也不用再过后续了
             all_true = bool(and_results)
             and_results = [r for r in and_results if r is not True]  # True就没必要and了我说
@@ -224,9 +257,11 @@ class Schemas:
                     or_result = or_result & r
                 or_results.append(or_result)
             elif all_true:
+                logger.info("and at")
                 or_results.append(True)
 
         if any(x is True for x in or_results):
+            logger.info(f"or skip qt={(time.perf_counter() - q_t0) * 1000:.1f}ms")
             return True
         or_results = [r for r in or_results if r is not False]
 
@@ -234,16 +269,23 @@ class Schemas:
             result = or_results[0]
             for r in or_results[1:]:
                 result = result | r
+            logger.info(f"or ok qt={(time.perf_counter() - q_t0) * 1000:.1f}ms")
             return result
         else:
+            logger.info(f"or af qt={(time.perf_counter() - q_t0) * 1000:.1f}ms")
             return False
 
     def query_some(self, q: str) -> np.ndarray | None:
         if q in self.qcache:
+            logger.info(f"qsome cache hit @ {q!r}")
             return self.qcache[q]
+        t0 = time.perf_counter()
         qr = self.query(q)
+        dt = (time.perf_counter() - t0) * 1000
+        logger.info(f"qsome dt={dt:.1f}ms")
         if qr is False:
             self.qcache[q] = None
+            logger.info(f"qsome cache miss @ {q!r}")
             return None
         if qr is True:
             clen = len(next(iter(self.cols.values())).data)
@@ -253,33 +295,34 @@ class Schemas:
                 chosen = np.random.choice(clen, self.batch_cache_size, replace=False)
         else:
             chosen = get_k_ts(qr, self.batch_cache_size, numba.get_num_threads(), np.random.randint(0, 2147483647))
-        print("debug: chosen", chosen)
         if (lch := len(chosen)) > 0:
             has_more = lch >= self.batch_cache_size  # 如果<说明一共就这些再取也没意义了
             chosen.dtype = np.dtype(chosen.dtype.name, metadata={"has_more": has_more})  # type: ignore #依然动态炸检）
             self.qcache[q] = chosen
+            logger.info(f"qsome ← {lch} ({has_more}) @ {q!r}")
         else:
             self.qcache[q] = None
+            logger.info("qsome ← nul")
         return chosen
 
     def query_pop(self, q: str) -> int | None:
         if q not in self.qcache:
             self.query_some(q)
         qc = self.qcache[q]
-        print("debug: qc direct:", qc)
         if qc is None:
+            logger.info(f"qpop cached empty @ {q!r}")
             return None
         if qc.dtype.metadata and qc.dtype.metadata["has_more"]:
-            print("debug: pop")
             ret = qc[-1]
             if len(qc) <= 1:
                 del self.qcache[q]
+                logger.info(f"qpop cache drain @ {q!r}")
             else:
                 self.qcache[q] = qc[:-1]
+                logger.info(f"qpop cache pop {ret} @ {q!r} lqc-1={len(qc) - 1}")
         else:
-            print("debug: keep")
             ret = np.random.choice(qc)
-        print("debug: pk ret", ret, qc)
+            logger.info(f"qpop cache rand {ret} @ {q!r} lqc={len(qc)}")
         return ret
 
     def get_col(self, n: str | None = None) -> ColProtoABC:
@@ -372,7 +415,7 @@ class SPinyin(SchemaABC):
         wc_pairs: list[tuple[str, str]] = self._wcpair_pat.findall(wcspecp)
         wc_pairs = [(f"{w}." if len(w) == 2 else w, tk) for w, tk in wc_pairs]
 
-        print(f"debug {wcspec=} {wc_pairs=}")
+        logger.info(f"dbg: SPinyin {wcspec=} {wc_pairs=}")
 
         iws: list[bool] = []
         fws: list[bool] = []
@@ -399,7 +442,7 @@ class SPinyin(SchemaABC):
             if wc[2] == "/":
                 syl.tone = self.pinyinparser.Tone.unspec
 
-        print(f"debug: {iws=} {fws=} {pinyins=}")
+        logger.info(f"dbg: SPinyin {iws=} {fws=} {pinyins=}")
         return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
 
     def _query_as(self, as_, mch, pinyinc):
