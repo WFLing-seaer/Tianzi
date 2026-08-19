@@ -931,7 +931,7 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         (?P<charset>.+?)
     )?
     (\\s?{RSYM_REF}
-        (?P<rname>.+?)
+        (?P<rname>[^{RSYM_CACHE}]+?)
     )?
     (\\s?{RSYM_CACHE}
         (?P<cname>.+?)
@@ -997,7 +997,7 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             (?P<rand>({"|".join(map(escape,rngs.names))}))
         )?
         (\\s?{RSYM_REF}
-            (?P<rname>.+?)
+            (?P<rname>[^{RSYM_CACHE}]+?)
         )?
         (\\s?[{RSYM_CACHE}]
             (?P<cname>.+?)
@@ -1269,7 +1269,7 @@ async def ImmediateNumbers(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         )?
     )
     (\\s?{RSYM_REF}
-        (?P<rname>.+?)
+        (?P<rname>[^{RSYM_CACHE}]+?)
     )?
     (\\s?[{RSYM_CACHE}]
         (?P<cname>.+?)
@@ -1422,7 +1422,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (?P<main>(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+?(?P<sep>[{RCS_SPLITSEP}])(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+(?:(?P=sep)(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+)*)
     (
         (\\s?{RSYM_MODIFY} (?P<rand>({"|".join(rsgs.names)})) )?
-        (\\s?{RSYM_REF} (?P<rname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
+        (\\s?{RSYM_REF} (?P<rname>[^{RSYM_LENGTH}{RSYM_TAIL}{RSYM_CACHE}]+?) )?
         (\\s?{RSYM_CACHE} (?P<cname>[^{RSYM_LENGTH}{RSYM_TAIL}]+?) )?
         (\\s?{RSYM_LENGTH} (?P<count>.+?) )?
     ){{4}}
@@ -1508,7 +1508,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     (?P<lex>({"|".join(escape(l) for l in lexloader.all_lexicons)}))
     (\\.(?P<colname>[^\\({RSYM_CACHE}]+?))?
     (\\{{(?P<query>.+?)\\}})?
-    ({RSYM_REF}(?P<rname>.+))?
+    ({RSYM_REF}(?P<rname>[^{RSYM_CACHE}]+))?
     ({RSYM_CACHE}(?P<cname>.+))?
     """)
 async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
