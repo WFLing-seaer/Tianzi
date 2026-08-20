@@ -23,7 +23,7 @@ LOAD_CACHE: TTLCache[str, Lexicon] = TTLCache[str, "Lexicon"](32, 1800)
 
 
 all_lexicons = [pathutil.from_filename(p.stem) for p in (pathlib.Path(__file__ or ".").parent / "lexicons").glob("*.pq")]
-logger.debug(f"LL: {all_lexicons=} {__file__=} {LEX_PATH=}")
+logger.info(f"LL: {all_lexicons=} {__file__=} {LEX_PATH=}")
 
 
 class Lexicon:
@@ -40,7 +40,7 @@ class Lexicon:
         inst.name = name
 
         if name in LOAD_CACHE:
-            logger.debug(f"LL load cache hit @ {name}")
+            logger.info(f"LL load cache hit @ {name}")
             return LOAD_CACHE[name]
         t0 = time.perf_counter()
         inst.schemas = Schemas(cast(dict[TColSpec, ColProtoABC], pqload.load(await asyncio.to_thread(awkward.from_parquet, inst.fp))))
@@ -97,7 +97,7 @@ class Lexicon:
     def query(self, qstr: str = "", colname: str | None = None):
         col = self.schemas.get_col(colname)
         target = self.schemas.query_pop(qstr)
-        logger.debug(f"LL query lex={self.name} col={colname!r} q={qstr!r} -> idx={target} cp={col.__class__.__name__}")
+        logger.info(f"LL query lex={self.name} col={colname!r} q={qstr!r} -> idx={target} cp={col.__class__.__name__}")
         return col.tostr(col.data[target])
 
     def __getitem__(self, key: slice[str, int, None]):
