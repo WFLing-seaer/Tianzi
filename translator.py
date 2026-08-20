@@ -1096,7 +1096,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     rets: list[str | Value] = []
 
     for chosen in chosens:
-        if cf_fspec or (otype != "nul"):
+        if cf_fspec or (otype not in ("nul", "n")):
             try:
                 ret: str | Value = numfmt(
                     fusr_to_nfmt_fmt(otype),
