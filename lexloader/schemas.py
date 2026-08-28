@@ -21,14 +21,30 @@ pypinyin_dict.phrase_pinyin_data.large_pinyin.load()
 pypinyin_dict.pinyin_data.cc_cedict.load()
 
 if __package__:
-    from .colproto import ColProtoABC, Pinyin, PlainText, SortedColABC, _Int, _Length
+    from .colproto import (
+        ColProtoABC,
+        Pinyin,
+        PlainText,
+        SortedColABC,
+        _Enum,
+        _Int,
+        _Length,
+    )
     from .headparser import TColSpec
-    from .nputil import find_first_true, get_k_ts
+    from .nputil import find_first_equal_where_index_greater, find_first_true, get_k_ts
     from .typing_utils import ArrayLike, AwkwardLike, asArrayLike
 else:
-    from colproto import ColProtoABC, Pinyin, PlainText, SortedColABC, _Int, _Length
+    from colproto import (
+        ColProtoABC,
+        Pinyin,
+        PlainText,
+        SortedColABC,
+        _Enum,
+        _Int,
+        _Length,
+    )
     from headparser import TColSpec
-    from nputil import find_first_true, get_k_ts
+    from nputil import find_first_equal_where_index_greater, find_first_true, get_k_ts
     from typing_utils import ArrayLike, AwkwardLike, asArrayLike
 
 logger = logging.getLogger(__name__)
@@ -514,19 +530,50 @@ class SPath(SchemaABC):
 
     cols: required_cols
 
-    query_re_pat = re.compile("/(?P<path>[^ ]+)/\\*")
+    query_re_pat = re.compile("/(?P<path>[^ ]+)/\\*(?P<getall>\\*)?")
 
     def query(self, mch):
         path = mch.group("path").split("/")
-        if not any(path):
-            return self.cols.parent.query("eq", 0)
+        getall = bool(mch.group("getall"))
         current_node_id = 0
         for pt in path:
             nmask = self.cols.parent.query("eq", current_node_id) & self.cols.name.query("__eq__", (pt,), {})
-            current_node_id = cast(int, self.cols.ID.data[find_first_true(nmask)])
+            current_node_pos = find_first_true(nmask)
+            if current_node_pos == -1:
+                return False
+            current_node_id = cast(int, self.cols.ID.data[current_node_pos])
             if current_node_id == -1:
                 return False
+        if getall:
+            rsibling_pos = find_first_equal_where_index_greater(
+                eqarr=self.cols.parent.data, idxarr=self.cols.ID.data, eqval=self.cols.parent.data[current_node_pos], gtval=current_node_id
+            )
+            if rsibling_pos == -1:
+                parend_id = self.cols.parent.data[current_node_pos]
+                parent_rsibling_pos = find_first_equal_where_index_greater(
+                    eqarr=self.cols.parent.data, idxarr=self.cols.ID.data, eqval=self.cols.parent.data[parend_id], gtval=parend_id
+                )
+                if parent_rsibling_pos == -1:
+                    return self.cols.ID.data > current_node_id
+                return (self.cols.ID.data < self.cols.ID.data[parent_rsibling_pos]) & (self.cols.ID.data > current_node_id)
+            rsibling_id = cast(int, self.cols.ID.data[rsibling_pos])
+            return (self.cols.ID.data < rsibling_id) & (self.cols.ID.data > current_node_id)
         return self.cols.parent.query("eq", current_node_id)
+
+
+@schema
+class SEnum(SchemaABC):
+    class required_cols(NamedTuple):
+        enum: _Enum
+
+    cols: required_cols
+
+    query_re_pat = re.compile("(?P<exclude>\\-?)#(?P<enum>[^ ]+)#")
+
+    def query(self, mch):
+        req = mch.group("enum")
+        exclude = bool(mch.group("exclude"))
+        return self.cols.enum.query("ne" if exclude else "eq", req)
 
 
 @schema

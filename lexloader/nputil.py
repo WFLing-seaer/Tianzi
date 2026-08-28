@@ -67,5 +67,17 @@ def find_first_true(arr):  # sourcery skip: use-next
     return -1
 
 
+@njit(cache=True)
+def find_first_equal_where_index_greater(eqarr, idxarr, eqval, gtval):  # sourcery skip: use-next
+    for i in range(len(eqarr)):
+        idx = idxarr[i]
+        if (idx > gtval) and (eqarr[idx] == eqval):
+            return i
+    return -1
+
+
 get_k_ts(np.array([], dtype=np.bool_), 1, 1, 0)
 find_first_true(np.array([], dtype=np.bool_))
+
+for t1, t2 in product([np.uint16, np.uint8], repeat=2):
+    find_first_equal_where_index_greater(np.array([], dtype=t1), np.array([], dtype=t2), 0, 0)
