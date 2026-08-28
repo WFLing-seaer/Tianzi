@@ -1355,7 +1355,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     try:
         offset: int = int(cast(str, ((await self.tegroup(mch, "offset")) or 0)))
     except ValueError:
-        return self.breakout(mch, "[E73.36c解析不能]", f"{{d}} - 偏移量「{self.egroup(mch, 'offset')}」无法被解析为整数。(E73.36c)")
+        raise PosteriorReject(mch, "[E73.36c解析不能]", f"{{d}} - 偏移量「{self.egroup(mch, 'offset')}」无法被解析为整数。(E73.36c)")
 
     _head = self.egroup(mch, "target")
 
@@ -1388,7 +1388,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     try:
         num: int = int(cast(str, (await self.tegroup(mch, "num"))))
     except ValueError:
-        return self.breakout(mch, "[E73.37b解析不能]", f"{{d}} - 次数「{self.egroup(mch, 'num')}」无法被解析为整数。(E73.37b)")
+        raise PosteriorReject(mch, "[E73.37b解析不能]", f"{{d}} - 次数「{self.egroup(mch, 'num')}」无法被解析为整数。(E73.37b)")  # 抛给Lex吃
         # 如果translate结果直接是浮点数，int会对其向下取整，这种情况下理应抛出73.37但是目前暂时不做该实现。TODO
 
     logger.info(f"Repeat ← {num=}")
