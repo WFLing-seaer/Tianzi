@@ -922,6 +922,51 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     return val if output else ""
 
 
+# region PyNativeStrOp
+@translator(f"""
+    (?P<target>.+?)\\s?
+    {RSYN_FONT}
+    (?P<op>[^{RSYM_TAIL}{RCS_SEP}{RCS_SEGSEP}]+?)
+    (\\s?{RSYM_REF}
+        (?P<rname>[^{RSYM_CACHE}]+?)
+    )?
+    (\\s?{RSYM_CACHE}
+        (?P<cname>.+?)
+    )?
+""")
+# 这个的rname和Font一样是没有用的，虽然设计上很傻逼但是我决定保留（
+async def PyNativeStrOp(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
+    """Python原生字符串操作 「PyNativeStrOp」
+    语法：{字符串} :{操作}[>{缓存名}]"""
+    target = await self.stegroup(mch, "target")
+    op = await self.stegroup(mch, "op")
+    cache_name = await self.stegroup(mch, "cname")
+    if bo := self.check_cache_name(cache_name):
+        return bo(mch)
+
+    ops = {  # 单参的str->str操作
+        "lower": str.lower,
+        "upper": str.upper,
+        "title": str.title,
+        "capitalize": str.capitalize,
+        "casefold": str.casefold,
+        "swapcase": str.swapcase,
+        "strip": str.strip,
+        "rstrip": str.rstrip,
+        "lstrip": str.lstrip,
+        "expandtabs": str.expandtabs,
+    }
+
+    if op not in ops:
+        raise PosteriorReject(mch, "[E44无效方法]", f"{{d}} - 「{op}」不是有效的方法。(E44)")
+
+    ret = ops[op](target)
+    self.result_cache["Ret":cache_name] = ret
+    logger.info(f"PyNativeStrOp → {ret}")
+
+    return ret
+
+
 # region Font
 @translator(f"""
     (?P<target>.+?)\\s?
