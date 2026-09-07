@@ -1233,8 +1233,21 @@ async def ReduceCalc(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         except OverflowError:
             val = float("inf")
     else:
-        logger.info(f"ReduceCalc → {val}")
-        return val
+        try:
+            fval = numfmt(
+                output_mode=segnums[1],  # 例如 'n', 'c', 'u', 'r', 'R'
+                fmt_spec="",  # 不额外指定格式
+                fill="",
+                align="",
+                sign="",
+                perc=None,
+                ftype=segnums[0],  # 例如 'd', 'f', 'x', 'X', 's'
+                value=val,
+            )
+        except TypeError, UnicodeError, OverflowError:
+            fval = val
+        logger.info(f"ReduceCalc → {fval} {val}")
+        return fval
 
     if not self.current_stat.allow_calc_big_number:
         return self.breakout(
