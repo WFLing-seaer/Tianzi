@@ -1503,7 +1503,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     sep: str = self.group(mch, "sep") or ""
     main: str = self.group(mch, "main") or ""
-    splitted = [self.epacse(seg) for seg in main.split(sep) if seg]
+    splitted = [seg for seg in main.split(sep) if seg]
     logger.info(f"Choice ↔ {splitted}")
 
     if len(splitted) <= 1:
@@ -1545,7 +1545,7 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
                 raise PosteriorReject
         else:
             opt_weights.append(1.0)
-        options.append(_parts[0])
+        options.append(self.epacse(_parts[0]))
     weights = [w * ow for w, ow in zip(weights, opt_weights)]
     swght = sum(weights)
     weights = [w / swght for w in weights]
