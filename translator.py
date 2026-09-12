@@ -225,7 +225,9 @@ def translator(pattern: str) -> Callable[[Translator], Translator]:
 
 
 def helps() -> str:
-    return "\n".join(trans[1].__doc__ or "" for trans in translators)
+    return "https://tianzi.hongbot.icu/howto"
+    # 之前从docstring自动生成的弃用了。
+    # docstring基本都过时了，不过还是有一点参考价值所以懒得删了摆烂喵
 
 
 def fusr_to_nfmt_fmt(fusr: str) -> Literal["c", "C", "u", "n", "r", "R"]:
