@@ -99,7 +99,7 @@ RSYM_REF = escape(SYM_REF)
 RCS_RANGE = escape(CS_RANGE)
 RCS_SEGSEP = escape(CS_SEGSEP)
 RCS_SPLITSEP = escape(CS_SPLITSEP)
-RCS_INLINE = escape(CS_INLINE)
+RCS_INLINE = CS_INLINE  # 我旃檀了
 RSYN_LA = escape(SYN_LA)
 RSYN_LR = escape(SYN_LR)
 RSYN_SLICESEP = escape(SYN_SLCSEP)
@@ -639,32 +639,53 @@ async def LingerRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 
 # region Slice
+_INT_RE = regex.compile(r"^(?:0|-?[1-9][0-9]*)$")
+
+
 @translator(
-    f"(?P<target>.+?){RSYN_SLICESEP}(?P<start>[\\-0-9{RCS_INLINE}]+)?{RSYN_SLICESEP}(?P<stop>[\\-0-9\\@{RCS_INLINE}]+)?({RSYN_SLICESEP}(?P<step>[\\-0-9{RCS_INLINE}]+))?"
+    f"(?P<target>.+?){RSYN_SLICESEP}(?P<start>[\\-0-9{RCS_INLINE}]+)?"
+    f"(?:(?P<sep2>{RSYN_SLICESEP})(?P<stop>[\\-0-9{RCS_INLINE}]+|{RSYM_MODIFY})?"
+    f"(?:{RSYN_SLICESEP}(?P<step>[\\-0-9{RCS_INLINE}]+)?)?)?"
 )
 async def Slice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     """切片 「Slice」
     语法：{值}:{起始}:{结束}[:步长]"""
     logger.info(f"Slice ← {mch.groupdict()}")
     main = await self.stegroup(mch, "target")
-    _start = cast(str, await self.tegroup(mch, "start")) or None
-    _stop = cast(str, await self.tegroup(mch, "stop")) or None
-    _step = cast(str, await self.tegroup(mch, "step")) or None
+
+    async def idx(name: str) -> int | None:
+        # 大概相当于__index__
+        if not self.group(mch, name):
+            return None
+        val = await self.tegroup(mch, name)
+        if isinstance(val, int):
+            return val
+        try:
+            sval = str(val)
+            if not _INT_RE.fullmatch(sval):
+                raise ValueError
+            return int(sval)
+        except ValueError:
+            raise PosteriorReject(mch, "[E73.36a切片参数无效]", f"{{d}} - 索引「{self.egroup(mch, name)}」无法被解析为整数。(E73.36a)")
+
+    start = await idx("start")
+    stop_raw = self.group(mch, "stop")
+    single = (not self.group(mch, "sep2") and not stop_raw and not self.group(mch, "step")) or (stop_raw == SYM_MODIFY)
+
     try:
-        if _stop == "@":
-            if not _start:
+        if single:
+            if start is None:
                 raise PosteriorReject
-            start = int(_start)
+            if stop_raw == SYM_MODIFY:
+                pass
+                # 已弃用，为兼容性保留
             ret = main[start]
         else:
-            if not _start and not _stop and not _step:
+            stop = await idx("stop")
+            step = await idx("step")
+            if start is None and stop is None and step is None:
                 raise PosteriorReject
-            start = cast(int | None, _start and int(_start))
-            stop = cast(int | None, _stop and int(_stop))
-            step = cast(int | None, _step and int(_step))
             ret = main[start:stop:step]
-    except ValueError:
-        return self.breakout(mch, "[E73.36a切片参数无效]", "{d} - 切片参数无效。 (E73.36a)")
     except IndexError:
         return self.breakout(mch, "[E73.21a索引越界]", "{d} - 索引越界。 (E73.21a)")
     logger.info(f"Slice → {ret}")
