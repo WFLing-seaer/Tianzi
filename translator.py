@@ -8,12 +8,14 @@ import time
 import traceback
 import warnings
 import weakref
+from bisect import bisect_right
 from collections import deque
 from collections.abc import Callable, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
 from functools import partial
-from itertools import pairwise, repeat
+from itertools import accumulate, pairwise, repeat
 from logging import getLogger
+from math import isfinite
 from random import Random
 from types import NoneType, SimpleNamespace
 from typing import (
@@ -199,6 +201,8 @@ randutil.set_nrandom(nrandom)
 
 logger = getLogger("translators")
 
+DOUBLE1PREV = 0.99999999999999988897769753748434595763683319091796875  # 1.0的上一个754双精度浮点数
+
 # endregion
 
 # region global vars
@@ -234,6 +238,30 @@ def fusr_to_nfmt_fmt(fusr: str) -> Literal["c", "C", "u", "n", "r", "R"]:
     return cast(
         Literal["c", "C", "u", "n", "r", "R"], {"cn": "c", "CN": "C", "u": "u", "U": "u", "unicode": "u", "ro": "r", "RO": "R"}.get(fusr, fusr)
     )
+
+
+def cut1(rand: float) -> float:
+    # [0,1]切右端点到[0,1)
+    return DOUBLE1PREV if rand == 1.0 else rand
+
+
+def load_rands_from(cached: Any) -> list[float] | None:
+    if isinstance(cached, (list, tuple)):
+        vals: list[Any] = list(cached)
+    elif isinstance(cached, str) or (isinstance(cached, (int, float)) and not isinstance(cached, bool)):
+        vals = [cached]
+    else:
+        return None
+    rands: list[float] = []
+    for val in vals:
+        try:
+            rand = float(val)
+        except TypeError, ValueError:
+            return None
+        if not isfinite(rand):
+            return None
+        rands.append(cut1(rand))
+    return rands or None
 
 
 class _AsyncCleanupQueue:
@@ -897,8 +925,8 @@ async def InnerValRef(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     for _, trans in translators:
         _field = field or trans.__name__
-        if ret := self.calc_cache.get(_field, name, None):
-            ret = str(ret)
+        if (ret := self.calc_cache.get(_field, name, None)) is not None:  # 我旃檀了喵，依然0.0布尔假给我击飞了
+            # 之前这有个str但是似乎有点意义不明，删了（意义不明吗（意义明吗（不知道反正删了
             logger.info(f"InnerValRef → {ret}")
             return ret
         if field:
@@ -1092,15 +1120,19 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         return bo(mch)
 
     rng = rngs.get(rand_type, random.random)
-    if rcache_name:
-        cached_rand: list[float] | float | None = self.calc_cache.get("Range", f"{rcache_name}_{count}", None)
-        rands: list[float] = (
-            [rng() for _ in range(count)] if cached_rand is None else ([cached_rand] if isinstance(cached_rand, (float, int)) else cached_rand)
+    rands: list[float] | None = load_rands_from(self.calc_cache.get("Range", rcache_name, None)) if rcache_name else None
+    if rands is None:
+        rands = [cut1(rng()) for _ in range(count)]
+    elif len(rands) == 1:
+        rands *= count  # 单选广播到多选
+    elif len(rands) != count:
+        return self.breakout(
+            mch,
+            "[E73.42a缓存不等长]",
+            f"{{d}} - 「{rcache_name}」包含{len(rands)}项（需要{count}项）(E73.42a)",
         )
-        if cache_name:
-            self.calc_cache["Range":f"{cache_name}_{count}"] = rands[0] if len(rands) == 1 else rands
-    else:
-        rands: list[float] = [rng() for _ in range(count)]
+    if cache_name:
+        self.calc_cache["Range":cache_name] = rands[0] if count == 1 else rands
 
     lit_value1, lit_value2 = (await self.tegroup(mch, "left")), (await self.tegroup(mch, "right"))
     try:
@@ -1535,28 +1567,6 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if count > len(splitted):
         replace = True
 
-    _rcache_name = f"{rcache_name}_{count}"
-
-    weights = None
-    if rcache_name:
-        weights: list[float] | None = self.calc_cache.get("Choice", _rcache_name)
-        if weights is None:
-            _rand: float | list[float] | None = self.calc_cache.get("Range", _rcache_name)
-            weights = [0.0] * len(splitted)
-            if isinstance(_rand, float):
-                weights[int(_rand * len(splitted))] = 1.0
-            elif isinstance(_rand, list):
-                replace = True
-                for _r_item in _rand:
-                    weights[int(_r_item * len(splitted))] = 1 / len(_rand)
-            else:
-                weights = None
-    if weights is None:
-        if rand_type:
-            weights = list(rsgs[rand_type](len(splitted)))
-        else:
-            weights = [1 / len(splitted)] * len(splitted)
-
     options: list[str] = []
     opt_weights: list[float] = []
     for item in splitted:
@@ -1569,14 +1579,55 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         else:
             opt_weights.append(1.0)
         options.append(self.epacse(_parts[0]))
-    weights = [w * ow for w, ow in zip(weights, opt_weights)]
-    swght = sum(weights)
-    weights = [w / swght for w in weights]
+
+    rands: list[float] | None = None
+    if rcache_name:
+        rands = load_rands_from(self.calc_cache.get("Choice", rcache_name, None))
+        if rands is None:
+            rands = load_rands_from(self.calc_cache.get("Range", rcache_name, None))
+        if rands is not None and len(rands) != count:
+            if len(rands) == 1 and replace:
+                rands *= count  # 和Range一样的
+            else:
+                return self.breakout(
+                    mch,
+                    "[E73.42b缓存不等长]",
+                    f"{{d}} - 「{rcache_name}」包含{len(rands)}项（需要{count}项）(E73.42b)",
+                )
+
+    left_idxs: list[int] = list(range(len(options)))
+    left_weights: list[float] = []
+    if rands is None:
+        if rand_type:
+            weights: list[float] = list(rsgs[rand_type](len(splitted)))
+        else:
+            weights = [1 / len(splitted)] * len(splitted)
+        weights = [w * ow for w, ow in zip(weights, opt_weights)]
+        swght = sum(weights)
+        left_weights = [w / swght for w in weights]
+
+    chosens: list[str] = []
+    positions: list[float] = []
+    cums: list[float] = list(accumulate(left_weights)) if rands is None and replace else []
+    for _i in range(count):
+        _n = len(left_idxs)
+        if rands is None:
+            if not replace:
+                cums = list(accumulate(left_weights))
+            _pick = min(bisect_right(cums, cut1(float(nrandom.random())) * cums[-1]), _n - 1)
+            positions.append((_pick + 0.5) / _n)
+        else:
+            _pick = max(0, min(int(rands[_i] * _n), _n - 1))
+            positions.append(rands[_i])
+        chosens.append(options[left_idxs[_pick]])
+        if not replace:
+            left_idxs.pop(_pick)
+            if left_weights:
+                left_weights.pop(_pick)
 
     if cache_name:
-        self.calc_cache["Choice":f"{cache_name}_{count}"] = weights
+        self.calc_cache["Choice":cache_name] = positions[0] if count == 1 else positions
 
-    chosens: list[str] = list(nrandom.choice(options, count, replace, weights))
     chosens = [str(await self.translate(opt)) for opt in chosens]
     ret = sep.join(chosens)
     self.result_cache["Ret":cache_name] = ret
@@ -1614,7 +1665,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         try:
             target = int(target)
         except ValueError:
-            return self.breakout(mch, "[E73.4b填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E73.4b)")
+            return self.breakout(mch, "[E73.41b填词失败]", "{d} - Lex的内部值必须为int或可以为int。 (E73.41b)")
 
     else:
         if bo := self.check_cache_name(cache_name):
