@@ -203,6 +203,10 @@ logger = getLogger("translators")
 
 DOUBLE1PREV = 0.99999999999999988897769753748434595763683319091796875  # 1.0的上一个754双精度浮点数
 
+PUAPAT = regex.compile("[\ue000-\ue07f\ue104-\ue500]")
+
+ESCPAT = regex.compile("\\\\(\\\\*.)")
+
 # endregion
 
 # region global vars
@@ -317,6 +321,30 @@ def set_new_otp(exp=60):
     return OTP[-1]
 
 
+class FFSEval(simpleeval.SimpleEval):
+    @staticmethod
+    def _raise(*_, **_____) -> Never:
+        raise simpleeval.InvalidExpression
+
+    @no_type_check
+    def __init__(self, names=None):
+        super().__init__()
+        self.builtins = {}
+        self.nodes[ast.Call] = self._raise
+        self.nodes[ast.ListComp] = self._raise
+        self.nodes[ast.SetComp] = self._raise
+        self.nodes[ast.DictComp] = self._raise
+        self.nodes[ast.GeneratorExp] = self._raise
+        self.attrfilter = self._attr_filter
+        if names is not None:
+            self.names = names
+
+    @staticmethod
+    def _attr_filter(_, attr):
+        if attr.startswith("_"):
+            raise simpleeval.InvalidExpression
+
+
 # endregion
 
 # region main
@@ -359,7 +387,7 @@ class Tianzi:
         return esc
 
     def _get_epacse_for(self, e: str):
-        return "".join(self.escaped.get(c, c) for c in e)
+        return "".join(self.escaped.get(c, c) for c in e) if self.escaped else e
 
     async def get_sandbox(self) -> Sandbox:
         if self._sandbox is None:
@@ -389,7 +417,7 @@ class Tianzi:
             raise BreakOut("[E60.1] 尝试转换的文本过长。输入不得大于65535字符")
 
         if self.current_stat.allow_pua_warning:
-            self.current_stat.pua_warning |= bool(regex.search("[\ue000-\ue07f\ue104-\ue500]", text))
+            self.current_stat.pua_warning |= bool(regex.search(PUAPAT, text))
         else:
             self.current_stat.pua_warning = False
 
@@ -397,7 +425,7 @@ class Tianzi:
 
         # 原来这有个clear epacse但是疑似会导致问题所以删了算了喵
 
-        text = regex.sub("\\\\(\\\\*.)", lambda m: self._get_escape_for(m.group(1)), text)
+        text = regex.sub(ESCPAT, lambda m: self._get_escape_for(m.group(1)), text)
 
         fields_index: list[tuple[int, int]] = find_outmost_bracket((SYM_HEAD, SYM_TAIL), text)
         fields: deque[SupportsStr] = deque(text[i + len(SYM_HEAD) : j - len(SYM_TAIL)] for i, j in fields_index)
@@ -813,29 +841,6 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     }
 
     logger.info(f"Calc: FFS cache: {cache_vars!r} {inner_cache_vars!r}")
-
-    class FFSEval(simpleeval.SimpleEval):
-        @staticmethod
-        def _raise(*_, **_____) -> Never:
-            raise simpleeval.InvalidExpression
-
-        @no_type_check
-        def __init__(self, names=None):
-            super().__init__()
-            self.builtins = {}
-            self.nodes[ast.Call] = self._raise
-            self.nodes[ast.ListComp] = self._raise
-            self.nodes[ast.SetComp] = self._raise
-            self.nodes[ast.DictComp] = self._raise
-            self.nodes[ast.GeneratorExp] = self._raise
-            self.attrfilter = self._attr_filter
-            if names is not None:
-                self.names = names
-
-        @staticmethod
-        def _attr_filter(_, attr):
-            if attr.startswith("_"):
-                raise simpleeval.InvalidExpression
 
     try:
         with warnings.catch_warnings():
