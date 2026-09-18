@@ -349,6 +349,8 @@ class Tianzi:
         self.escaped: dict[str, str] = {}
 
     def _get_escape_for(self, s: str):
+        with contextlib.suppress(StopIteration):
+            return next(k for k, v in self.escaped.items() if v == s)
         try:
             esc = next(self.escape_chr_it)
         except StopIteration:
