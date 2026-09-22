@@ -61,6 +61,7 @@ class Lexicon:
         array_size = sum(getattr(arr.data, "nbytes", 0) for arr in self.schemas.cols.values())
         arr_size_num, arr_size_amp = unitutil.byte2size(array_size)
         column_names = self.schemas.cols.keys()
+        column_cprotos = self.schemas.cols.values()
         column_heads = self.schemas.orig_heads
         size = len(next(iter(self.schemas.cols.values())).data)
         size_num, size_amp = unitutil.num2ch(size)
@@ -80,8 +81,8 @@ class Lexicon:
                         }"
                         for k,v in column_head.group.items())}】"
                     if column_head.group else ""
-                }"
-                for column_name, column_head in zip(column_names, column_heads)
+                }（{type(column_colproto).__name__}）"
+                for column_name, column_head, column_colproto in zip(column_names, column_heads, column_cprotos)
             )}"
             )}{(
             "\n"
