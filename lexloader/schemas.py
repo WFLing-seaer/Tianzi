@@ -308,7 +308,7 @@ class Schemas:
             if clen <= self.batch_cache_size:
                 chosen = np.arange(clen, dtype=np.int64)
             else:
-                chosen = np.random.choice(clen, self.batch_cache_size, replace=False)
+                chosen = np.random.default_rng().choice(clen, self.batch_cache_size, replace=False)
         else:
             chosen = get_k_ts(qr, self.batch_cache_size, numba.get_num_threads(), np.random.randint(0, 2147483647))
         if (lch := len(chosen)) > 0:
