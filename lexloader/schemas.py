@@ -532,26 +532,28 @@ class SPath(SchemaABC):
 
     query_re_pat = re.compile("/(?P<path>[^ ]+)/\\*(?P<getall>\\*)?")
 
-    def query(self, mch):
-        path = mch.group("path").split("/")
+    def query(self, mch):  # sourcery skip: extract-method
+        path: list[str] = mch.group("path").split("/")
         getall = bool(mch.group("getall"))
         current_node_id = 0
+        current_node_pos = -1
         for pt in path:
             nmask = self.cols.parent.query("eq", current_node_id) & self.cols.name.query("__eq__", (pt,), {})
             current_node_pos = find_first_true(nmask)
             if current_node_pos == -1:
                 return False
             current_node_id = cast(int, self.cols.ID.data[current_node_pos])
-            if current_node_id == -1:
-                return False
         if getall:
             rsibling_pos = find_first_equal_where_index_greater(
-                eqarr=self.cols.parent.data, idxarr=self.cols.ID.data, eqval=self.cols.parent.data[current_node_pos], gtval=current_node_id
+                eqarr=self.cols.parent.data, eqval=self.cols.parent.data[current_node_pos], gtpos=current_node_id
             )
             if rsibling_pos == -1:
-                parend_id = self.cols.parent.data[current_node_pos]
+                parend_id = cast(int, self.cols.parent.data[current_node_pos])
+                if parend_id == 0:
+                    return self.cols.ID.data > current_node_id
+                parent_pos = find_first_true(self.cols.ID.query("eq", parend_id))
                 parent_rsibling_pos = find_first_equal_where_index_greater(
-                    eqarr=self.cols.parent.data, idxarr=self.cols.ID.data, eqval=self.cols.parent.data[parend_id], gtval=parend_id
+                    eqarr=self.cols.parent.data, eqval=self.cols.parent.data[parent_pos], gtpos=parend_id
                 )
                 if parent_rsibling_pos == -1:
                     return self.cols.ID.data > current_node_id
