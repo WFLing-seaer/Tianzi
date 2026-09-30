@@ -857,7 +857,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     except (simpleeval.InvalidExpression, SyntaxError) as ieexp:
         if isinstance(ieexp, SyntaxError):
             bing_url = f"https://cn.bing.com/search?q=Python%E6%80%8E%E4%B9%88%E8%A7%A3%E5%86%B3{quote(str(ieexp).removesuffix(" (<unknown>, line 1)"))}"
-            metaso_url = f"https://metaso.cn/?q=Python%E4%BD%BF%E7%94%A8{mch.group(0).removeprefix("=")}%E6%97%B6%E5%87%BA%E7%8E%B0%E4%BA%86%E8%AF%AD%E6%B3%95%E9%94%99%E8%AF%AF{quote(str(ieexp).removesuffix(" (<unknown>, line 1)"))}%EF%BC%8C%E8%AF%B7%E5%B8%AE%E6%88%91%E5%88%86%E6%9E%90%E9%97%AE%E9%A2%98"
+            metaso_url = f"https://metaso.cn/?q=Python%E4%BD%BF%E7%94%A8{quote(mch.group(0).removeprefix("="))}%E6%97%B6%E5%87%BA%E7%8E%B0%E4%BA%86%E8%AF%AD%E6%B3%95%E9%94%99%E8%AF%AF{quote(str(ieexp).removesuffix(" (<unknown>, line 1)"))}%EF%BC%8C%E8%AF%B7%E5%B8%AE%E6%88%91%E5%88%86%E6%9E%90%E9%97%AE%E9%A2%98"
             runoob_url = "https://runoob.com/python3/python3-tutorial.html"
 
             bing_shorturl, metaso_shorturl, runoob_shorturl = await asyncio.gather(
