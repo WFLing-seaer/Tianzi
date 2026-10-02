@@ -49,6 +49,7 @@ from .fontutil import fonts
 from .numutil import NSLVL, Value, numfmt, numify, numsify, numsify_any, numsimp
 from .pysandbox import RETVAL_MISSING, Sandbox
 from .randutil import rngs, rsgs
+from .strfilters import filters as strfilters
 from .textutil import find_outmost_bracket
 from .urlutil import shorturl
 
@@ -980,7 +981,7 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     return val if output else ""
 
 
-# region PyNativeStrOp
+# region StrFilter
 @translator(f"""
     (?P<target>.+?)\\s?
     {RSYN_FONT}
@@ -993,8 +994,8 @@ async def InnerValAssign(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     )?
 """)
 # 这个的rname和Font一样是没有用的，虽然设计上很傻逼但是我决定保留（
-async def PyNativeStrOp(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
-    """Python原生字符串操作 「PyNativeStrOp」
+async def StrFilter(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
+    """字符串滤镜 「StrFilter」
     语法：{字符串} :{操作}[>{缓存名}]"""
     target = await self.stegroup(mch, "target")
     op = await self.stegroup(mch, "op")
@@ -1002,23 +1003,10 @@ async def PyNativeStrOp(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
 
-    ops = {  # 单参的str->str操作
-        "lower": str.lower,
-        "upper": str.upper,
-        "title": str.title,
-        "capitalize": str.capitalize,
-        "casefold": str.casefold,
-        "swapcase": str.swapcase,
-        "strip": str.strip,
-        "rstrip": str.rstrip,
-        "lstrip": str.lstrip,
-        "expandtabs": str.expandtabs,
-    }
-
-    if op not in ops:
+    if op not in strfilters.names:
         raise PosteriorReject(mch, "[E44无效方法]", f"{{d}} - 「{op}」不是有效的方法。(E44)")
 
-    ret = ops[op](target)
+    ret = strfilters[op](target)
     self.result_cache["Ret":cache_name] = ret
     logger.info(f"PyNativeStrOp → {ret}")
 
