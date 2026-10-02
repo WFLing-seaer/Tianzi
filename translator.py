@@ -1093,7 +1093,7 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         (\\s?[{RSYM_CACHE}]
             (?P<cname>.+?)
         )?
-        (\\s?{RSYM_LENGTH}
+        ((?P<csep>[{RCS_SEP}]?){RSYM_LENGTH}
             (?P<count>.+?)
         )?
     ){{5}}""")
@@ -1222,7 +1222,7 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     logger.info(f"Range → {rets}")
 
-    return rets[0] if len(rets) == 1 else " ".join(map(str, rets))
+    return rets[0] if len(rets) == 1 else self.group(mch, "csep").join(map(str, rets))
 
 
 # region ReduceCalc
