@@ -1107,9 +1107,13 @@ async def Range(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     rcache_name: str = await self.stegroup(mch, "rname")
     rand_type: str = await self.stegroup(mch, "rand")
     try:
-        count: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
-    except ValueError:
-        return self.breakout(mch, "[E73.37b解析不能]", f"{{d}} - 选择数「{self.egroup(mch, 'count')}」无法被解析为整数。(E73.37b)")
+        countteg = await self.tegroup(mch, "count")
+        count: int = max(1, int(cast(str, countteg) or 1))
+    except ValueError, TypeError:
+        return self.breakout(mch, "[E73.37b解析不能]", f"{{d}} - 选择数「{countteg}」无法被解析为整数。(E73.37b)")
+
+    if count > 4096:
+        return self.breakout(mch, "[E60.71b次数无效]", f"{{d}} - 次数「{count}」超出范围。最大次数为4096。(E60.71b)")
 
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
@@ -1502,7 +1506,7 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     logger.info(f"Repeat ← {num=}")
 
     if num > 4096:
-        return self.breakout(mch, "[E60.71次数无效]", f"{{d}} - 次数「{num}」超出范围。最大次数为4096。(E60.71)")
+        return self.breakout(mch, "[E60.71a次数无效]", f"{{d}} - 次数「{num}」超出范围。最大次数为4096。(E60.71a)")
     if len(main) * num > 131072:
         return self.breakout(
             mch,
@@ -1547,9 +1551,13 @@ async def Choice(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     if bo := self.check_cache_name(cache_name):
         return bo(mch)
     try:
-        count: int = max(1, int(cast(str, await self.tegroup(mch, "count")) or 1))
+        countteg = await self.tegroup(mch, "count")
+        count: int = max(1, int(cast(str, countteg) or 1))
     except ValueError:
-        return self.breakout(mch, "[E73.37c解析不能]", f"{{d}} - 选择数「{self.egroup(mch, 'count')}」无法被解析为整数。(E73.37c)")
+        return self.breakout(mch, "[E73.37c解析不能]", f"{{d}} - 选择数「{countteg}」无法被解析为整数。(E73.37c)")
+
+    if count > 4096:
+        return self.breakout(mch, "[E60.71c次数无效]", f"{{d}} - 次数「{count}」超出范围。最大次数为4096。(E60.71c)")
 
     replace = bool(mch.group("replace"))
     rand_type: str = await self.stegroup(mch, "rand")
