@@ -1062,7 +1062,7 @@ async def Font(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 # region Range
 @translator(f"""
     (?P<left>[^{RSYM_HEAD}{RSYM_TAIL}{RSYM_MODIFY}{RSYN_CALC}\\s]+?)
-    \\s*(?P<sep>([{RCS_RANGE}]|——))\\s*
+    (?P<sep>([{RCS_RANGE}]|——))
     (?P<right>[^{RSYM_HEAD}{RSYM_TAIL}{RSYM_MODIFY}\\s:]+?(?<!({RCG_ELLIPSIS})))
     (
         (:
@@ -1527,7 +1527,10 @@ async def Repeat(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
 # region Choice
 @translator(f"""
-    (?P<main>(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+?(?P<sep>[{RCS_SPLITSEP}])(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+(?:(?P=sep)(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+)*)
+    (?P<main>(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+?
+    (?P<sep>[{RCS_SPLITSEP}])
+    (?:(?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}]+(?P=sep))*
+    (?![{RSYM_MODIFY}{RSYM_REF}{RSYM_CACHE}{RSYM_LENGTH}])[^{RCS_SPLITSEP}{RSYM_LENGTH}]+)
     (
         (\\s?{RSYM_MODIFY} (?P<rand>({"|".join(rsgs.names)})) )?
         (\\s?{RSYM_REF} (?P<rname>[^{RSYM_LENGTH}{RSYM_TAIL}{RSYM_CACHE}]+?) )?
