@@ -1,6 +1,7 @@
 import ast
 import asyncio
 import contextlib
+import dataclasses
 import numbers
 import operator
 import secrets
@@ -12,6 +13,7 @@ from bisect import bisect_right
 from collections import deque
 from collections.abc import Callable, Coroutine, Iterator, Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from functools import partial
 from itertools import accumulate, pairwise, repeat
 from logging import getLogger
@@ -153,9 +155,16 @@ class SupportsStr(Protocol):
     def __str__(self) -> str: ...
 
 
+class ErrLvl(StrEnum):
+    IGNORE = "ignore"
+    ABORT = "abort"
+    INLINE = "inline"
+    RAISE = "raise"
+
+
 @dataclass
 class _Stat:
-    err_level: Literal["ignore", "abort", "inline", "raise"] = "raise"
+    err_level: ErrLvl = ErrLvl.RAISE
     # ignore: 替换成"" abort: 保持原样 inline: 行内替换为缩写 raise: 抛出
 
     allow_underscore_in_cache_name: bool = False
@@ -168,6 +177,12 @@ class _Stat:
 
     allow_pua_warning = True
     pua_warning: bool = False
+
+    allow_repeat_warning: bool = True
+    repeat_count: int = 0
+
+    allow_lex_warning: bool = True
+    lex_warnings: set[str] = dataclasses.field(default_factory=set)
 
     divide_by_zero = "err"
 
@@ -207,6 +222,119 @@ DOUBLE1PREV = 0.99999999999999988897769753748434595763683319091796875  # 1.0的�
 PUAPAT = regex.compile("[\ue000-\ue07f\ue104-\ue500]")
 
 ESCPAT = regex.compile("\\\\(\\\\*.)")
+
+# endregion
+
+# region hint consts
+
+HT_PUA = "警告：输入/处理过程中涉及保留的PUA字符，可能导致意外的行为。请不要使用PUA字符，或者如果您明白自己在做什么的话，请使用[[config<disable_pua_warning>]]消除本警告。如果您认为这是误报，请@找北。 (H31)"  # Hint Text
+
+HT_REPEAT = "不建议使用复制粘贴！建议使用Repeat语法（[[...*{count}]] [[...**{count}]]）详见手册→https://tianzi.hongbot.icu/howto#%e9%87%8d%e5%a4%8dsmall--%e4%b8%8bsmall (H42)"
+
+HTS_LEX: dict[str, str] = {
+    "大写字母": "不建议使用「大写字母」这个词库；请使用更直接的[[A-Z]]。 (H44)",
+    "中文一到九": "不建议使用「中文一到九」这个词库；请使用更直接的[[一-九]]。 (H44)",
+    "小写字母": "不建议使用「小写字母」这个词库；请使用更直接的[[a-z]]。 (H44)",
+    "骰子": "不建议使用「骰子」这个词库；请使用更直接的[[1-6]]。 (H44)",
+}
+
+HC_REPEAT_MIN_LEN = 8  # Hint Check
+HC_REPEAT_GRAM = 4
+HC_REPEAT_MAXPOS = 64
+HC_REPEAT_MAXPAIRS = 4096
+HC_REPEAT_MAXCNT = 4096
+HC_REPEAT_MAXLEN = 1 << 22
+
+# endregion
+# region hint funcs
+
+
+def hintcheck_repeat(self: Tianzi, text: str) -> None:
+    self.current_stat.repeat_count = max_repeat_count(text)
+
+
+def hintcheck_lex(self: Tianzi, lex_name: str) -> None:
+    if lex_name in HTS_LEX:
+        self.current_stat.lex_warnings.add(lex_name)
+
+
+def hintcheck_pua(self: Tianzi, text) -> None:
+    self.current_stat.pua_warning |= bool(regex.search(PUAPAT, text))
+
+
+# 以下两个函数是面向蓝色大肥鱼编程的产物
+
+
+def _lce(text: str, i: int, j: int, lim: int) -> int:
+    hmax = min(lim, len(text) - j)
+    lo = 0
+    step = HC_REPEAT_GRAM
+    while step <= hmax and text[i : i + step] == text[j : j + step]:
+        lo = step
+        step <<= 1
+    hi = min(hmax, step - 1)
+    while lo < hi:
+        mid = (lo + hi + 1) >> 1
+        if text[i : i + mid] == text[j : j + mid]:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo
+
+
+def max_repeat_count(text: str) -> int:
+    n = len(text)
+    if n < HC_REPEAT_MIN_LEN:
+        return 0
+
+    positions: dict[str, list[int]] = {}
+    for i in range(n - HC_REPEAT_GRAM + 1):
+        gram = text[i : i + HC_REPEAT_GRAM]
+        known = positions.get(gram)
+        if known is None:
+            positions[gram] = [i]
+        elif len(known) < HC_REPEAT_MAXPOS:
+            known.append(i)
+        else:
+            known[-1] = i
+
+    best = 0
+    pairs = 0
+    budget = HC_REPEAT_MAXLEN
+    for known in positions.values():
+        if len(known) < 2:
+            continue
+        for ai, i in enumerate(known):
+            for j in known[ai + 1 :]:
+                pairs += 1
+                if pairs > HC_REPEAT_MAXPAIRS or budget <= 0:
+                    return best
+                period = j - i
+                f = _lce(text, i, j, min(n - j, HC_REPEAT_MAXCNT * period, budget))
+                budget -= f
+                if f < period:
+                    continue
+                count = 1 + f // period
+                head = i
+                while budget > 0 and count < HC_REPEAT_MAXCNT and head >= period and text[head - period : head] == text[head : head + period]:
+                    head -= period
+                    count += 1
+                    budget -= period
+                if count > best and count * period >= HC_REPEAT_MIN_LEN:
+                    best = count
+    return best
+
+
+def build_hints(stat: _Stat) -> list[str]:
+    hints: list[str] = []
+    if stat.allow_pua_warning and stat.pua_warning:
+        hints.append(HT_PUA)
+    if stat.allow_repeat_warning and stat.repeat_count > 1:
+        hints.append(HT_REPEAT.format(count=min(stat.repeat_count, HC_REPEAT_MAXCNT)))
+    if stat.allow_lex_warning:
+        hints.extend(hint for lex, hint in HTS_LEX.items() if lex in stat.lex_warnings)
+    return hints
+
 
 # endregion
 
@@ -390,6 +518,10 @@ class Tianzi:
     def _get_epacse_for(self, e: str):
         return "".join(self.escaped.get(c, c) for c in e) if self.escaped else e
 
+    @property
+    def hints(self) -> list[str]:
+        return build_hints(self.current_stat)
+
     async def get_sandbox(self) -> Sandbox:
         if self._sandbox is None:
             self._sandbox = await Sandbox.new()
@@ -417,10 +549,9 @@ class Tianzi:
         if len(text) > 65535:
             raise BreakOut("[E60.1] 尝试转换的文本过长。输入不得大于65535字符")
 
-        if self.current_stat.allow_pua_warning:
-            self.current_stat.pua_warning |= bool(regex.search(PUAPAT, text))
-        else:
-            self.current_stat.pua_warning = False
+        if final:
+            hintcheck_repeat(self, text)
+        hintcheck_pua(self, text)
 
         logger.info(f"TRANSLATE {text} ↓↓↓")
 
@@ -606,13 +737,13 @@ class Tianzi:
 
     def breakout(self, mch: SupportsGroup, abbr: str, msg: str) -> str:
         match self.current_stat.err_level:
-            case "ignore":
+            case ErrLvl.IGNORE:
                 return ""
-            case "abort":
+            case ErrLvl.ABORT:
                 return self.egroup(mch, 0)
-            case "inline":
+            case ErrLvl.INLINE:
                 return abbr
-            case "raise":
+            case ErrLvl.RAISE:
                 raise BreakOut(msg.replace("{d}", self.egroup(mch, 0)))
 
 
@@ -766,13 +897,13 @@ async def Config(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
         case "disable_cache_name_with_underscore":
             self.current_stat.allow_underscore_in_cache_name = False
         case "error_level_ignore" | "eig":
-            self.current_stat.err_level = "ignore"
+            self.current_stat.err_level = ErrLvl.IGNORE
         case "error_level_abort" | "ea":
-            self.current_stat.err_level = "abort"
+            self.current_stat.err_level = ErrLvl.ABORT
         case "error_level_inline" | "eil":
-            self.current_stat.err_level = "inline"
+            self.current_stat.err_level = ErrLvl.INLINE
         case "error_level_raise" | "er":
-            self.current_stat.err_level = "raise"
+            self.current_stat.err_level = ErrLvl.RAISE
         case "max_calculate_output_normal":
             self.current_stat.max_calc_output_length = 512
         case "max_calculate_output_long" | "cl":
@@ -783,6 +914,14 @@ async def Config(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             self.current_stat.allow_pua_warning = False
         case "enable_pua_warning":
             self.current_stat.allow_pua_warning = True
+        case "disable_repeat_warning":
+            self.current_stat.allow_repeat_warning = False
+        case "enable_repeat_warning":
+            self.current_stat.allow_repeat_warning = True
+        case "disable_lex_warning":
+            self.current_stat.allow_lex_warning = False
+        case "enable_lex_warning":
+            self.current_stat.allow_lex_warning = True
         case "enable_calc_bignum" | "cb":
             self.current_stat.allow_calc_big_number = True
         case "disable_calc_bignum":
@@ -1655,6 +1794,7 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
     logger.info(f"Lex ← {mch.groupdict()}")
 
     lex_name: str = await self.stegroup(mch, "lex")
+    hintcheck_lex(self, lex_name)
     colname: str = await self.stegroup(mch, "colname")
     query: str = await self.stegroup(mch, "query")
     cache_name: str = await self.stegroup(mch, "cname")
