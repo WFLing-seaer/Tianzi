@@ -59,7 +59,7 @@ def schema(cls: type[SchemaABC]) -> type[SchemaABC]:
 
 
 class Schemas:
-    def __init__(self, data: dict[TColSpec, ColProtoABC], idx_cache_size=256):
+    def __init__(self, data: dict[TColSpec, ColProtoABC], idx_cache_size=4096):
         self.cols = {k.name: v for k, v in data.items()}
         self.orig_heads = list(data.keys())
         self.batch_cache_size = idx_cache_size
