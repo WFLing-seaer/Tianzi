@@ -306,10 +306,12 @@ def max_repeat_count(text: str) -> int:
             continue
         for ai, i in enumerate(known):
             for j in known[ai + 1 :]:
+                period = j - i
+                if len(set(text[i:j])) == 1:
+                    continue
                 pairs += 1
                 if pairs > HC_REPEAT_MAXPAIRS or budget <= 0:
                     return best
-                period = j - i
                 f = _lce(text, i, j, min(n - j, HC_REPEAT_MAXCNT * period, budget))
                 budget -= f
                 if f < period:
@@ -320,6 +322,7 @@ def max_repeat_count(text: str) -> int:
                     head -= period
                     count += 1
                     budget -= period
+
                 if count > best and count * period >= HC_REPEAT_MIN_LEN:
                     best = count
     return best
