@@ -219,9 +219,9 @@ logger = getLogger("translators")
 
 DOUBLE1PREV = 0.99999999999999988897769753748434595763683319091796875  # 1.0的上一个754双精度浮点数
 
-PUAPAT = regex.compile("[\ue000-\ue07f\ue104-\ue500]")
+PUAPAT = regex.compile("[\ue104-\ue500]")
 
-ESCPAT = regex.compile("\\\\(\\\\*.)")
+ESCPAT = regex.compile("\\\\(.)")
 
 # endregion
 
@@ -238,8 +238,8 @@ HTS_LEX: dict[str, str] = {
     "骰子": "不建议使用「骰子」这个词库；请使用更直接的[[1-6]]。 (H44)",
 }
 
-HC_REPEAT_MIN_LEN = 8  # Hint Check
-HC_REPEAT_GRAM = 4
+HC_REPEAT_MIN_LEN = 20  # Hint Check
+HC_REPEAT_GRAM = 10
 HC_REPEAT_MAXPOS = 64
 HC_REPEAT_MAXPAIRS = 4096
 HC_REPEAT_MAXCNT = 4096
@@ -518,8 +518,11 @@ class Tianzi:
         self.escaped[esc] = s
         return esc
 
-    def _get_epacse_for(self, e: str):
+    def get_epacse_for(self, e: str):
         return "".join(self.escaped.get(c, c) for c in e) if self.escaped else e
+
+    def get_epacse_orig(self, e: str):
+        return "".join((f"\\{self.escaped[c]}" if c in self.escaped else c) for c in e) if self.escaped else e
 
     @property
     def hints(self) -> list[str]:
@@ -705,11 +708,11 @@ class Tianzi:
         ret = "".join(text_lst)
 
         if isinstance(ret, str):
-            ret = self._get_epacse_for(ret)
+            ret = self.get_epacse_for(ret)
         logger.info(f"TRANSLATE {text} → {ret} ↑↑↑")
 
         if final:
-            ret = self.epacse(ret)
+            ret = self.get_epacse_for(self.epacse(ret))
 
         return ret
 
@@ -730,7 +733,7 @@ class Tianzi:
     def epacse(self, s: str):
         for c, r in self.nested_inline_epacse.items():
             s = s.replace(c, r)
-        return self._get_epacse_for(s)
+        return s
 
     async def tegroup(self, mch: SupportsGroup, group: str | int) -> SupportsStr:
         return await self.translate(self.egroup(mch, group))
@@ -960,7 +963,7 @@ async def Calculate(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
 
     logger.info(f"Calculate ← {mch.groupdict()}")
 
-    main = self.egroup(mch, "expr")
+    main = self.get_epacse_orig(self.egroup(mch, "expr"))
     cache_vars = {
         k: (v.tolist() if isinstance(v, (np.ndarray, awkward.Array, np.generic)) else v)
         for k, v in self.result_cache.caches.get("Ret", {}).items()
