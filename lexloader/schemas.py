@@ -405,22 +405,31 @@ class SPinyin(SchemaABC):
     _wcpair_pat = re.compile(_wcpair_pat_s := f"([.?/]{{2,3}})({_tokens_pat})")
 
     query_re_pat = re.compile(
-        rf":(((?P<asp>[./?]{{2,3}})?(?P<as>~[^ ]+))|((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?(?P<pinyin>[012345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+)))"
+        rf":(((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?((?P<as>~[^ ]+)|(?P<pinyin>[012345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+))))"
     )
 
     def query(self, mch):
         pinyinc = self.cols.pinyin
 
         if as_ := mch.group("as"):
-            return self._query_as(as_, mch, pinyinc)
-        pinyin: str = mch.group("pinyin") or ""
+            pinyins = self.pinyinparser.parse(
+                "'".join(
+                    pypinyin.lazy_pinyin(
+                        as_,
+                        style=pypinyin.Style.TONE,
+                        neutral_tone_with_five=True,
+                        errors=lambda _: None,  # type: ignore
+                    )
+                )
+            )
+        else:
+            pinyin: str = mch.group("pinyin") or ""
+            pinyins = self.ppinst.parse(pinyin)
         istart: int | None = (mch.group("start") or None) and int(mch.group("start"))
         iend: int | None = (mch.group("end") or None) and int(mch.group("end"))
 
         wcspecp = mch.group("wcspecp") or ""
         wcspec = mch.group("wcspec") or ""
-
-        pinyins = self.ppinst.parse(pinyin)
 
         if not wcspec and not wcspecp:
             return pinyinc.query(istart, iend, False, False, False, pinyins)
@@ -460,30 +469,6 @@ class SPinyin(SchemaABC):
 
         logger.info(f"dbg: SPinyin {iws=} {fws=} {pinyins=}")
         return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
-
-    def _query_as(self, as_, mch, pinyinc):
-        as_ = as_[1:]
-        asp: str = mch.group("asp")
-        asp = f"{asp}." if len(asp) == 2 else asp
-        ri, rf, rt = (asp[0] == "/", asp[1] == "/", asp[2] == "/") if asp else (False, False, False)
-        wi, wf, wt = (asp[0] == "?", asp[1] == "?", asp[2] == "?") if asp else (False, False, False)
-
-        aspy = self.pinyinparser.parse(
-            "'".join(
-                pypinyin.lazy_pinyin(
-                    as_,
-                    style=pypinyin.Style.TONE,
-                    neutral_tone_with_five=True,
-                    errors=lambda _: None,  # type: ignore
-                )
-            )
-        )
-        for syl in aspy:
-            syl.initial = self.pinyinparser.Initial.unspec if ri else syl.initial
-            syl.final = self.pinyinparser.Final.unspec if rf else syl.final
-            syl.tone = self.pinyinparser.Tone.unspec if rt else syl.tone
-
-        return pinyinc.query(None, None, wi, wf, wt, aspy)
 
 
 @schema
