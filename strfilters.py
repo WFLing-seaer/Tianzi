@@ -1,3 +1,4 @@
+import random
 from collections.abc import Callable
 
 from .nameutil import Names
@@ -90,3 +91,10 @@ MORSE = {
 @filters.named("摩斯", "摩尔斯", "摩斯码", "摩尔斯码", "摩斯电码", "摩尔斯电码", "morse")
 def morse(s: str) -> str:
     return "/".join(MORSE.get(c.upper(), c) for c in s)
+
+
+@filters.named("乱序", "shuffle")
+def shuffle(s: str) -> str:
+    l = list(s)
+    random.shuffle(l)
+    return "".join(l)
