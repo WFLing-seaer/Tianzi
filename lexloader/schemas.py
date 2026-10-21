@@ -285,7 +285,13 @@ class Schemas:
                     tm = (time.perf_counter() - t0) * 1000
                     if m is not None:
                         t1 = time.perf_counter()
-                        part_result = schema_inst.query(m)
+                        try:
+                            part_result = schema_inst.query(m)
+                        except (ValueError, IndexError) as e:
+                            # 匹配到的片段解析失败同样属于查询语法错误，
+                            # 与下方“没有任何schema匹配”统一为SyntaxError。
+                            detail = f": {e}" if str(e) else ""
+                            raise SyntaxError(f"不合法的查询 @ {remaining}{detail}") from e
                         tq = (time.perf_counter() - t1) * 1000
                         result = result & part_result
                         remaining = remaining[m.end() :]

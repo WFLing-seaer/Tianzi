@@ -167,6 +167,24 @@ def parse_pat_alt(s: str, pos: int) -> tuple[list[list], int]:
     return alts, pos + 1
 
 
+def parse_brace_quant(s: str, pos: int) -> tuple[tuple[int, int | None], int] | None:
+    # {n} / {n,} / {n,m} 的单一解析入口，保证组量词和音节量词报错一致。
+    m = BRACE_QUANT_PAT.match(s, pos)
+    if m is None:
+        return None
+    lo = int(m.group(1))
+    if m.group(2) is None:
+        rep = (lo, lo)
+    elif not m.group(2):
+        rep = (lo, None)
+    else:
+        hi = int(m.group(2))
+        if lo > hi:
+            raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
+        rep = (lo, hi)
+    return rep, m.end()
+
+
 def parse_pat_quant(s: str, pos: int) -> tuple[tuple[int, int | None] | None, int]:
     # 只有紧跟 ')' 或 ']' 的量词才作用于整组；紧跟字面量的量词留在字面量里，
     # 由parse_pinyin_query按音节粒度处理。
@@ -176,20 +194,10 @@ def parse_pat_quant(s: str, pos: int) -> tuple[tuple[int, int | None] | None, in
     if ch in QUANTIFIERS:
         return QUANTIFIERS[ch], pos + 1
     if ch == "{":
-        m = BRACE_QUANT_PAT.match(s, pos)
-        if m is None:
+        ret = parse_brace_quant(s, pos)
+        if ret is None:
             raise ValueError(f"不合法的拼音量词 @ {s[pos:]!r}")
-        lo = int(m.group(1))
-        if m.group(2) is None:
-            rep = (lo, lo)
-        elif not m.group(2):
-            rep = (lo, None)
-        else:
-            hi = int(m.group(2))
-            if lo > hi:
-                raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
-            rep = (lo, hi)
-        return rep, m.end()
+        return ret
     return None, pos
 
 
@@ -281,22 +289,13 @@ def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllabl
             quantify(QUANTIFIERS[ch], ch)
             i += 1
         elif ch == "{":
-            m = BRACE_QUANT_PAT.match(s, i)
-            if m is None:
+            ret = parse_brace_quant(s, i)
+            if ret is None:
                 raise ValueError(f"不合法的拼音量词 @ {s[i:]!r}")
-            lo = int(m.group(1))
-            if m.group(2) is None:
-                rep = (lo, lo)
-            elif not m.group(2):
-                rep = (lo, None)
-            else:
-                hi = int(m.group(2))
-                if lo > hi:
-                    raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
-                rep = (lo, hi)
+            rep, end = ret
             flush()
-            quantify(rep, m.group(0))
-            i = m.end()
+            quantify(rep, s[i:end])
+            i = end
         else:
             buf.append(ch)
             i += 1

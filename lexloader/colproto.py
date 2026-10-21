@@ -685,6 +685,9 @@ class Pinyin(ColProtoABC[list[int]]):
         # 否则规范化后可能得到空区间而被当成匹配。
         if m is not None and m < 0 and n is not None and n >= 0:
             raise IndexError
+        # 与__p_check一致：同号区间若n<m则宽度为负，任何词长都不可能匹配，属非法区间
+        if m is not None and n is not None and n < m and (m < 0) == (n < 0):
+            raise ValueError
         for i in numba.prange(nstring):
             lo = offsets[i]
             length = offsets[i + 1] - lo
@@ -768,6 +771,9 @@ class Pinyin(ColProtoABC[list[int]]):
         # 每个目标音节消费一条token边，ε边处理选择、可选项和星号。
         if m is not None and m < 0 and n is not None and n >= 0:
             raise IndexError
+        # 与__p_check/__p_check_re一致：同号区间若n<m则宽度为负，属非法区间
+        if m is not None and n is not None and n < m and (m < 0) == (n < 0):
+            raise ValueError
         nstring = len(offsets) - 1
         nstate = len(eps_off) - 1
         result = np.zeros(nstring, dtype=np.bool_)
