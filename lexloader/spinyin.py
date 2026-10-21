@@ -39,6 +39,36 @@ BRACE_QUANT_PAT = re.compile(r"\{([0-9]+)(?:,([0-9]*))?\}")
 # 展开(...)和[...]时的分支上限，避免组合数爆炸
 MAX_EXPAND = 256
 
+_INITIAL_ABSENT = {int(pinyinparser.Initial.missing), int(pinyinparser.Initial.unspec), int(pinyinparser.Initial.nul)}
+_FINAL_ABSENT = {int(pinyinparser.Final.missing), int(pinyinparser.Final.unspec), int(pinyinparser.Final.nul)}
+_TONE_ABSENT = {int(pinyinparser.Tone.missing), int(pinyinparser.Tone.unspec), int(pinyinparser.Tone.nul)}
+
+
+def char_kind(ch: str) -> str | None:
+    # 字符类中的字符是在同一文本位置上互相替换的，必须扮演同一种角色。
+    # 例如 [b-d] 都是声母，而 [a-c] 混用了韵母和声母，不可能都合法。
+    if ch in "012345":
+        return "声调"
+    try:
+        part = PPINST.parse(ch)
+    except ValueError:
+        return None
+    if len(part) != 1:
+        return None
+    syl = part[0]
+    has_i = int(syl.initial) not in _INITIAL_ABSENT
+    has_f = int(syl.final) not in _FINAL_ABSENT
+    has_t = int(syl.tone) not in _TONE_ABSENT
+    if has_i and has_f:
+        return "音节"
+    if has_i:
+        return "声母"
+    if has_f:
+        return "韵母"
+    if has_t:
+        return "声调"
+    return None
+
 
 class _PText(NamedTuple):
     # 一段连续的拼音字面量（未带量词的括号/字符类已合并进来）
@@ -300,7 +330,20 @@ def expand_class(s: str, pos: int) -> tuple[list[str], int]:
         raise ValueError("未闭合的 '['")
     if not chars:
         raise ValueError("空的字符类 []")
-    return list(dict.fromkeys(chars)), pos + 1
+    chars = list(dict.fromkeys(chars))
+    kinds: dict[str, str] = {}
+    for ch in chars:
+        kind = char_kind(ch)
+        if kind is None:
+            raise ValueError(f"字符类中的 {ch!r} 不是合法的拼音片段")
+        kinds[ch] = kind
+    first = chars[0]
+    for ch in chars[1:]:
+        if kinds[ch] != kinds[first]:
+            raise ValueError(
+                f"字符类中的字符必须属于同一类（声母/韵母/声调）: {first!r} 是{kinds[first]}，{ch!r} 是{kinds[ch]}，不能出现在同一位置"
+            )
+    return chars, pos + 1
 
 
 def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllable], list[tuple[int, int | None]]]:
