@@ -1,21 +1,23 @@
 import logging
 import re
-from typing import NamedTuple
+from typing import Literal, NamedTuple
 
 import numpy as np
 import pinyinparser
 
 if __package__:
     from .colproto import Pinyin
+    from .nfautil import NFA
     from .typing_utils import ArrayLike
 else:
     from colproto import Pinyin  # type: ignore
+    from nfautil import NFA  # type: ignore
     from typing_utils import ArrayLike  # type: ignore
 
 logger = logging.getLogger(__name__)
 
-# SPinyin查询串的语法与编译。SPinyin类本身留在schemas.py，
-# 这里只放与schema框架无关、可单独复用的部分。
+# SPinyin查询串的解析与编译：模式->AST->音节mask/NFA（通用NFA构造见nfautil.py）。
+# SPinyin类本身留在schemas.py，这里只放与schema框架无关、可单独复用的部分。
 
 PPINST = pinyinparser.Parser(
     pinyinparser.TOKENS.BASIC | pinyinparser.TOKENS.NE | pinyinparser.TOKENS.EXT | pinyinparser.TOKENS.EXT_NE | pinyinparser.TOKENS.EXT2
@@ -44,7 +46,10 @@ _FINAL_ABSENT = {int(pinyinparser.Final.missing), int(pinyinparser.Final.unspec)
 _TONE_ABSENT = {int(pinyinparser.Tone.missing), int(pinyinparser.Tone.unspec), int(pinyinparser.Tone.nul)}
 
 
-def char_kind(ch: str) -> str | None:
+CharKind = Literal["音节", "声母", "韵母", "声调"]
+
+
+def char_kind(ch: str) -> CharKind | None:
     # 字符类中的字符是在同一文本位置上互相替换的，必须扮演同一种角色。
     # 例如 [b-d] 都是声母，而 [a-c] 混用了韵母和声母，不可能都合法。
     if ch in "012345":
@@ -81,127 +86,6 @@ class _PGroup(NamedTuple):
     rep: tuple[int, int | None]
 
 
-class _NFA:
-    # Thompson NFA构造器：token边消费一个目标音节，ε边表示选择、可选和重复。
-    # 音节级量词仍然放在token边自己的repeat里，不展开成多个状态；
-    # 只有括号组量词才需要NFA来表达“整组重复”。
-
-    def __init__(self, max_states: int = 8192, max_tokens: int = 4096):
-        self.n = 0
-        self.eps: list[tuple[int, int]] = []
-        self.toks: list[tuple[int, int, int]] = []
-        self.masks: list[tuple[int, int]] = []
-        self._mask_idx: dict[tuple[int, int], int] = {}
-        self.max_states = max_states
-        self.max_tokens = max_tokens
-        self.tok_copies = 0
-
-    def state(self) -> int:
-        s = self.n
-        self.n += 1
-        if self.n > self.max_states:
-            raise ValueError(f"拼音查询过于复杂（状态数上限 {self.max_states}）")
-        return s
-
-    def add_mask(self, and_val: int, xand_val: int) -> int:
-        key = (and_val, xand_val)
-        idx = self._mask_idx.get(key)
-        if idx is None:
-            idx = len(self.masks)
-            self._mask_idx[key] = idx
-            self.masks.append(key)
-        return idx
-
-    def eps_edge(self, a: int, b: int):
-        self.eps.append((a, b))
-
-    def token_edge(self, a: int, b: int, mask: int):
-        self.tok_copies += 1
-        if self.tok_copies > self.max_tokens:
-            raise ValueError(f"拼音查询过于复杂（token数上限 {self.max_tokens}）")
-        self.toks.append((a, b, mask))
-
-    def empty(self) -> tuple[int, int]:
-        s = self.state()
-        return s, s
-
-    def token(self, mask: int) -> tuple[int, int]:
-        a = self.state()
-        b = self.state()
-        self.token_edge(a, b, mask)
-        return a, b
-
-    def seq(self, frags: list[tuple[int, int]]) -> tuple[int, int]:
-        if not frags:
-            return self.empty()
-        start, prev = frags[0]
-        for s, a in frags[1:]:
-            self.eps_edge(prev, s)
-            prev = a
-        return start, prev
-
-    def alt(self, frags: list[tuple[int, int]]) -> tuple[int, int]:
-        if len(frags) == 1:
-            return frags[0]
-        s = self.state()
-        a = self.state()
-        for fs, fa in frags:
-            self.eps_edge(s, fs)
-            self.eps_edge(fa, a)
-        return s, a
-
-    def star(self, factory) -> tuple[int, int]:
-        s = self.state()
-        a = self.state()
-        self.eps_edge(s, a)
-        fs, fa = factory()
-        self.eps_edge(s, fs)
-        self.eps_edge(fa, fs)
-        self.eps_edge(fa, a)
-        return s, a
-
-    def repeat(self, factory, lo: int, hi: int | None) -> tuple[int, int]:
-        frags = [factory() for _ in range(lo)]
-        if hi is None:
-            frags.append(self.star(factory))
-        else:
-            if hi < lo:
-                raise ValueError(f"拼音量词范围非法: {{{lo},{hi}}}")
-            for _ in range(hi - lo):
-                fs, fa = factory()
-                self.eps_edge(fs, fa)  # 可跳过这一份
-                frags.append((fs, fa))
-        return self.seq(frags)
-
-    def arrays(self):
-        n = self.n
-        eps_off = np.zeros(n + 1, dtype=np.int64)
-        for s, _ in self.eps:
-            eps_off[s + 1] += 1
-        np.cumsum(eps_off, out=eps_off)
-        eps_to = np.zeros(len(self.eps), dtype=np.int64)
-        pos = eps_off[:-1].copy()
-        for s, d in self.eps:
-            eps_to[pos[s]] = d
-            pos[s] += 1
-
-        tok_off = np.zeros(n + 1, dtype=np.int64)
-        for s, _, _ in self.toks:
-            tok_off[s + 1] += 1
-        np.cumsum(tok_off, out=tok_off)
-        tok_to = np.zeros(len(self.toks), dtype=np.int64)
-        tok_mask = np.zeros(len(self.toks), dtype=np.int64)
-        pos = tok_off[:-1].copy()
-        for s, d, m in self.toks:
-            tok_to[pos[s]] = d
-            tok_mask[pos[s]] = m
-            pos[s] += 1
-
-        and16 = np.array([m[0] for m in self.masks], dtype=np.uint16)
-        xand16 = np.array([m[1] for m in self.masks], dtype=np.uint16)
-        return eps_off, eps_to, tok_off, tok_to, tok_mask, and16, xand16
-
-
 def parse_pinyin_pattern(s: str) -> list[list]:
     # 解析为若干“节点序列”变体。
     # 未带量词的括号/字符类先按字面展开并与相邻字面量合并，保持
@@ -226,6 +110,10 @@ def pat_key(pattern: list) -> tuple:
     )
 
 
+def _too_many_branches() -> ValueError:
+    return ValueError(f"拼音查询的分支过多（上限 {MAX_EXPAND}）")
+
+
 def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
     variants: list[list] = [[]]
     while pos < len(s):
@@ -236,6 +124,9 @@ def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
             alts, pos = parse_pat_alt(s, pos + 1)
             rep, npos = parse_pat_quant(s, pos)
             if rep is None:
+                # 先检查笛卡尔积大小再展开，避免构造出远超上限的中间列表
+                if len(variants) * len(alts) > MAX_EXPAND:
+                    raise _too_many_branches()
                 variants = [cat(v, a) for v in variants for a in alts]
             else:
                 variants = [v + [_PGroup(alts, rep)] for v in variants]
@@ -244,6 +135,8 @@ def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
             chars, pos = expand_class(s, pos + 1)
             rep, npos = parse_pat_quant(s, pos)
             if rep is None:
+                if len(variants) * len(chars) > MAX_EXPAND:
+                    raise _too_many_branches()
                 variants = [append_text(v, c) for v in variants for c in chars]
             else:
                 alts = [[_PText(c)] for c in chars]
@@ -255,7 +148,7 @@ def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
             variants = [append_text(v, ch) for v in variants]
             pos += 1
         if len(variants) > MAX_EXPAND:
-            raise ValueError(f"拼音查询的分支过多（上限 {MAX_EXPAND}）")
+            raise _too_many_branches()
     if stops:
         raise ValueError("未闭合的 '('")
     return variants, pos
@@ -266,6 +159,9 @@ def parse_pat_alt(s: str, pos: int) -> tuple[list[list], int]:
     while pos < len(s) and s[pos] == "|":
         seq, pos = parse_pat_seq(s, pos + 1, "|)")
         alts.extend(seq)
+        # 累积分支同样要设限，否则 a|a|... 会先把整个列表建出来
+        if len(alts) > MAX_EXPAND:
+            raise _too_many_branches()
     if pos >= len(s):
         raise ValueError("未闭合的 '('")
     return alts, pos + 1
@@ -331,7 +227,7 @@ def expand_class(s: str, pos: int) -> tuple[list[str], int]:
     if not chars:
         raise ValueError("空的字符类 []")
     chars = list(dict.fromkeys(chars))
-    kinds: dict[str, str] = {}
+    kinds: dict[str, CharKind] = {}
     for ch in chars:
         kind = char_kind(ch)
         if kind is None:
@@ -481,7 +377,7 @@ def query_parsed(
 
 
 def compile_nodes(
-    nfa: _NFA,
+    nfa: NFA,
     pinyinc: Pinyin,
     nodes: list,
     wcspec: str,

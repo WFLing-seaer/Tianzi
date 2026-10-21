@@ -32,8 +32,9 @@ if __package__:
         _Length,
     )
     from .headparser import TColSpec
+    from .nfautil import NFA
     from .nputil import find_first_equal_where_index_greater, find_first_true, get_k_ts
-    from .spinyin import (
+    from .pinyinutil import (
         BRACE_QUANT_PAT,
         LIKE_WILDCARDS,
         MAX_EXPAND,
@@ -43,7 +44,6 @@ if __package__:
         WCPAIR_PAT,
         WCPAIR_PAT_S,
         WCSPEC_DCT,
-        _NFA,
         _PGroup,
         _PText,
         compile_nodes,
@@ -63,8 +63,9 @@ else:
         _Length,
     )
     from headparser import TColSpec
+    from nfautil import NFA  # type: ignore
     from nputil import find_first_equal_where_index_greater, find_first_true, get_k_ts
-    from spinyin import (  # type: ignore
+    from pinyinutil import (  # type: ignore
         BRACE_QUANT_PAT,
         LIKE_WILDCARDS,
         MAX_EXPAND,
@@ -74,7 +75,6 @@ else:
         WCPAIR_PAT,
         WCPAIR_PAT_S,
         WCSPEC_DCT,
-        _NFA,
         _PGroup,
         _PText,
         compile_nodes,
@@ -486,7 +486,7 @@ class SPinyin(SchemaABC):
         results: list[ArrayLike] = []
         for pattern in self._parse_pinyin_pattern(pinyin):
             if any(isinstance(node, _PGroup) for node in pattern):
-                nfa = _NFA()
+                nfa = NFA()
                 start, accept = compile_nodes(nfa, pinyinc, pattern, wcspec, wcspecp, wc_pairs, self.ppinst)
                 eps_off, eps_to, tok_off, tok_to, tok_mask, and16, xand16 = nfa.arrays()
                 results.append(

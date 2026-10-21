@@ -665,6 +665,7 @@ class Pinyin(ColProtoABC[list[int]]):
     __pw_d = np.array([], dtype=np.uint16)
     __pw_a = np.array([0], dtype=np.uint16)
     __pw_x = np.array([0], dtype=np.uint16)
+    __pw_a64 = np.array([0], dtype=np.int64)
     for __c_o, (__c_m, __c_n) in tqdm(
         itertools.product([__pw_o32, __pw_o64], [(0, None), (0, -1), (0, 1), (None, None), (None, -1), (None, 1), (-1, None), (-2, -1)]),
         total=16,
@@ -820,6 +821,31 @@ class Pinyin(ColProtoABC[list[int]]):
             result[i] = cur[accept]
         return result
 
+    # 与__p_check一样在导入时预热，避免首个量词查询在查询路径里同步触发编译。
+    # m/n只有None和int两种类型，两种偏移类型 × 四种组合即可覆盖全部签名。
+    for __c_o, (__c_m, __c_n) in tqdm(
+        itertools.product([__pw_o32, __pw_o64], [(0, None), (0, -1), (None, None), (None, -1)]),
+        total=8,
+        desc="PinYin Regex NumBa JIT...",
+        disable=logger.level > logging.INFO,
+    ):
+        __p_check_re(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x, __pw_a64, __pw_a64)
+        __p_check_nfa(
+            __c_o,
+            __pw_d,
+            __c_m,
+            __c_n,
+            __pw_a,
+            __pw_x,
+            __pw_a64,
+            __pw_a64,
+            __pw_a64,
+            __pw_a64,
+            __pw_a64,
+            0,
+            0,
+        )
+
     def _build_masks(
         self,
         iw: Iterable[bool] | bool,
@@ -889,8 +915,10 @@ class Pinyin(ColProtoABC[list[int]]):
         and_np, xand_np = self._build_masks(iw, fw, tw, s)
         if len(reps) != len(and_np):
             raise ValueError(f"reps与音节数量不一致: {len(reps)} != {len(and_np)}")
-        rmin = np.array([lo for lo, _ in reps], dtype=np.int64)
-        rmax = np.array([np.iinfo(np.int64).max if hi is None else hi for _, hi in reps], dtype=np.int64)
+        i64max = np.iinfo(np.int64).max
+        # 计数超过int64上限时截断：词长不可能达到，语义不变；直接np.int64(...)会溢出
+        rmin = np.array([min(lo, i64max) for lo, _ in reps], dtype=np.int64)
+        rmax = np.array([i64max if hi is None else min(hi, i64max) for _, hi in reps], dtype=np.int64)
 
         return asArrayLike(self.__p_check_re(offset, data, m, n, and_np, xand_np, rmin, rmax))
 
