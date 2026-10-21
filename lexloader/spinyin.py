@@ -4,26 +4,41 @@ from typing import NamedTuple
 
 import numpy as np
 import pinyinparser
-import pypinyin
-import pypinyin_dict.phrase_pinyin_data.large_pinyin
-import pypinyin_dict.pinyin_data.cc_cedict
 
 if __package__:
     from .colproto import Pinyin
-    from .schema_base import SchemaABC, schema
     from .typing_utils import ArrayLike
 else:
     from colproto import Pinyin  # type: ignore
-    from schema_base import SchemaABC, schema  # type: ignore
     from typing_utils import ArrayLike  # type: ignore
-
-pypinyin_dict.phrase_pinyin_data.large_pinyin.load()
-pypinyin_dict.pinyin_data.cc_cedict.load()
 
 logger = logging.getLogger(__name__)
 
+# SPinyin查询串的语法与编译。SPinyin类本身留在schemas.py，
+# 这里只放与schema框架无关、可单独复用的部分。
 
-# region SPinyin
+PPINST = pinyinparser.Parser(
+    pinyinparser.TOKENS.BASIC | pinyinparser.TOKENS.NE | pinyinparser.TOKENS.EXT | pinyinparser.TOKENS.EXT_NE | pinyinparser.TOKENS.EXT2
+)
+
+WCSPEC_DCT = {m.name: m.value for m in pinyinparser.Initial if m.name not in {"missing", "nul", "unspec"}} | {
+    m.name: m.value for m in pinyinparser.Final if m.name not in {"missing", "nul", "unspec"}
+}
+
+TOKENS_PAT = "|".join(map(re.escape, sorted(WCSPEC_DCT.keys(), key=len, reverse=True)))
+
+WCPAIR_PAT_S = f"([.?/]{{2,3}})({TOKENS_PAT})"
+
+WCPAIR_PAT = re.compile(WCPAIR_PAT_S)
+
+QUANTIFIERS = {"*": (0, None), "+": (1, None)}
+# SQL LIKE 风格的通配：_ 是任意一个音节，% 是任意个（含0个）音节，二者本身无需前置音节
+LIKE_WILDCARDS = {"_": (1, 1), "%": (0, None)}
+# 有界量词 {n} / {n,} / {n,m}
+BRACE_QUANT_PAT = re.compile(r"\{([0-9]+)(?:,([0-9]*))?\}")
+# 展开(...)和[...]时的分支上限，避免组合数爆炸
+MAX_EXPAND = 256
+
 
 class _PText(NamedTuple):
     # 一段连续的拼音字面量（未带量词的括号/字符类已合并进来）
@@ -157,123 +172,179 @@ class _NFA:
         return eps_off, eps_to, tok_off, tok_to, tok_mask, and16, xand16
 
 
-@schema
-class SPinyin(SchemaABC):
-    # pinyin可以jit但是建议aot
-    class required_cols(NamedTuple):
-        pinyin: Pinyin
+def parse_pinyin_pattern(s: str) -> list[list]:
+    # 解析为若干“节点序列”变体。
+    # 未带量词的括号/字符类先按字面展开并与相邻字面量合并，保持
+    # (zh|w)(un|ang) -> zhun/zhang/wun/wang 的旧语义；
+    # 带量词的括号/字符类保留为_PGroup，量词作用于整组。
+    variants, pos = parse_pat_seq(s, 0, "")
+    if pos != len(s):
+        raise ValueError(f"不合法的拼音查询 @ {s[pos:]!r}")
+    uniq: list[list] = []
+    seen: set[tuple] = set()
+    for v in variants:
+        key = pat_key(v)
+        if key not in seen:
+            seen.add(key)
+            uniq.append(v)
+    return uniq
 
-    cols: required_cols
 
-    import pinyinparser
-
-    ppinst = pinyinparser.Parser(
-        pinyinparser.TOKENS.BASIC | pinyinparser.TOKENS.NE | pinyinparser.TOKENS.EXT | pinyinparser.TOKENS.EXT_NE | pinyinparser.TOKENS.EXT2
+def pat_key(pattern: list) -> tuple:
+    return tuple(
+        ("t", n.text) if isinstance(n, _PText) else ("g", tuple(pat_key(a) for a in n.alts), n.rep) for n in pattern
     )
 
-    wcspec_dct = {m.name: m.value for m in pinyinparser.Initial if m.name not in {"missing", "nul", "unspec"}} | {
-        m.name: m.value for m in pinyinparser.Final if m.name not in {"missing", "nul", "unspec"}
-    }
 
-    _tokens_pat = "|".join(map(re.escape, sorted(wcspec_dct.keys(), key=len, reverse=True)))
-
-    _wcpair_pat = re.compile(_wcpair_pat_s := f"([.?/]{{2,3}})({_tokens_pat})")
-
-    query_re_pat = re.compile(
-        rf":(((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?((?P<as>~[^ ]+)|(?P<pinyin>(?![*+])[012345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề' ?*+\-_%()|\[\]{{}},]+))))"
-    )
-
-    _quantifiers = {"*": (0, None), "+": (1, None)}
-    # SQL LIKE 风格的通配：_ 是任意一个音节，% 是任意个（含0个）音节，二者本身无需前置音节
-    _like_wildcards = {"_": (1, 1), "%": (0, None)}
-    # 有界量词 {n} / {n,} / {n,m}
-    _brace_quant_pat = re.compile(r"\{([0-9]+)(?:,([0-9]*))?\}")
-    # 展开(...)和[...]时的分支上限，避免组合数爆炸
-    _max_expand = 256
-
-    @classmethod
-    def _parse_pinyin_pattern(cls, s: str) -> list[list]:
-        # 解析为若干“节点序列”变体。
-        # 未带量词的括号/字符类先按字面展开并与相邻字面量合并，保持
-        # (zh|w)(un|ang) -> zhun/zhang/wun/wang 的旧语义；
-        # 带量词的括号/字符类保留为_PGroup，量词作用于整组。
-        variants, pos = cls._parse_pat_seq(s, 0, "")
-        if pos != len(s):
-            raise ValueError(f"不合法的拼音查询 @ {s[pos:]!r}")
-        uniq: list[list] = []
-        seen: set[tuple] = set()
-        for v in variants:
-            key = cls._pat_key(v)
-            if key not in seen:
-                seen.add(key)
-                uniq.append(v)
-        return uniq
-
-    @classmethod
-    def _pat_key(cls, pattern: list) -> tuple:
-        return tuple(
-            ("t", n.text) if isinstance(n, _PText) else ("g", tuple(cls._pat_key(a) for a in n.alts), n.rep)
-            for n in pattern
-        )
-
-    @classmethod
-    def _parse_pat_seq(cls, s: str, pos: int, stops: str) -> tuple[list[list], int]:
-        variants: list[list] = [[]]
-        while pos < len(s):
-            ch = s[pos]
-            if ch in stops:
-                return variants, pos
-            if ch == "(":
-                alts, pos = cls._parse_pat_alt(s, pos + 1)
-                rep, npos = cls._parse_pat_quant(s, pos)
-                if rep is None:
-                    variants = [cls._cat(v, a) for v in variants for a in alts]
-                else:
-                    variants = [v + [_PGroup(alts, rep)] for v in variants]
-                    pos = npos
-            elif ch == "[":
-                chars, pos = cls._expand_class(s, pos + 1)
-                rep, npos = cls._parse_pat_quant(s, pos)
-                if rep is None:
-                    variants = [cls._append_text(v, c) for v in variants for c in chars]
-                else:
-                    alts = [[_PText(c)] for c in chars]
-                    variants = [v + [_PGroup(alts, rep)] for v in variants]
-                    pos = npos
-            elif ch in ")]|":
-                raise ValueError(f"不匹配的 {ch!r}")
-            else:
-                variants = [cls._append_text(v, ch) for v in variants]
-                pos += 1
-            if len(variants) > cls._max_expand:
-                raise ValueError(f"拼音查询的分支过多（上限 {cls._max_expand}）")
-        if stops:
-            raise ValueError("未闭合的 '('")
-        return variants, pos
-
-    @classmethod
-    def _parse_pat_alt(cls, s: str, pos: int) -> tuple[list[list], int]:
-        alts, pos = cls._parse_pat_seq(s, pos, "|)")
-        while pos < len(s) and s[pos] == "|":
-            seq, pos = cls._parse_pat_seq(s, pos + 1, "|)")
-            alts.extend(seq)
-        if pos >= len(s):
-            raise ValueError("未闭合的 '('")
-        return alts, pos + 1
-
-    @classmethod
-    def _parse_pat_quant(cls, s: str, pos: int) -> tuple[tuple[int, int | None] | None, int]:
-        # 只有紧跟 ')' 或 ']' 的量词才作用于整组；紧跟字面量的量词留在字面量里，
-        # 由_parse_pinyin_query按音节粒度处理。
-        if pos >= len(s):
-            return None, pos
+def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
+    variants: list[list] = [[]]
+    while pos < len(s):
         ch = s[pos]
-        if ch in cls._quantifiers:
-            return cls._quantifiers[ch], pos + 1
-        if ch == "{":
-            m = cls._brace_quant_pat.match(s, pos)
+        if ch in stops:
+            return variants, pos
+        if ch == "(":
+            alts, pos = parse_pat_alt(s, pos + 1)
+            rep, npos = parse_pat_quant(s, pos)
+            if rep is None:
+                variants = [cat(v, a) for v in variants for a in alts]
+            else:
+                variants = [v + [_PGroup(alts, rep)] for v in variants]
+                pos = npos
+        elif ch == "[":
+            chars, pos = expand_class(s, pos + 1)
+            rep, npos = parse_pat_quant(s, pos)
+            if rep is None:
+                variants = [append_text(v, c) for v in variants for c in chars]
+            else:
+                alts = [[_PText(c)] for c in chars]
+                variants = [v + [_PGroup(alts, rep)] for v in variants]
+                pos = npos
+        elif ch in ")]|":
+            raise ValueError(f"不匹配的 {ch!r}")
+        else:
+            variants = [append_text(v, ch) for v in variants]
+            pos += 1
+        if len(variants) > MAX_EXPAND:
+            raise ValueError(f"拼音查询的分支过多（上限 {MAX_EXPAND}）")
+    if stops:
+        raise ValueError("未闭合的 '('")
+    return variants, pos
+
+
+def parse_pat_alt(s: str, pos: int) -> tuple[list[list], int]:
+    alts, pos = parse_pat_seq(s, pos, "|)")
+    while pos < len(s) and s[pos] == "|":
+        seq, pos = parse_pat_seq(s, pos + 1, "|)")
+        alts.extend(seq)
+    if pos >= len(s):
+        raise ValueError("未闭合的 '('")
+    return alts, pos + 1
+
+
+def parse_pat_quant(s: str, pos: int) -> tuple[tuple[int, int | None] | None, int]:
+    # 只有紧跟 ')' 或 ']' 的量词才作用于整组；紧跟字面量的量词留在字面量里，
+    # 由parse_pinyin_query按音节粒度处理。
+    if pos >= len(s):
+        return None, pos
+    ch = s[pos]
+    if ch in QUANTIFIERS:
+        return QUANTIFIERS[ch], pos + 1
+    if ch == "{":
+        m = BRACE_QUANT_PAT.match(s, pos)
+        if m is None:
+            raise ValueError(f"不合法的拼音量词 @ {s[pos:]!r}")
+        lo = int(m.group(1))
+        if m.group(2) is None:
+            rep = (lo, lo)
+        elif not m.group(2):
+            rep = (lo, None)
+        else:
+            hi = int(m.group(2))
+            if lo > hi:
+                raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
+            rep = (lo, hi)
+        return rep, m.end()
+    return None, pos
+
+
+def append_text(v: list, c: str) -> list:
+    if v and isinstance(v[-1], _PText):
+        return v[:-1] + [_PText(v[-1].text + c)]
+    return v + [_PText(c)]
+
+
+def cat(v: list, a: list) -> list:
+    # 拼接两个节点序列；相邻字面量合并，使未量化括号仍按文本展开。
+    if not a:
+        return list(v)
+    if not v:
+        return list(a)
+    if isinstance(v[-1], _PText) and isinstance(a[0], _PText):
+        return v[:-1] + [_PText(v[-1].text + a[0].text)] + a[1:]
+    return v + a
+
+
+def expand_class(s: str, pos: int) -> tuple[list[str], int]:
+    chars: list[str] = []
+    while pos < len(s) and s[pos] != "]":
+        if pos + 2 < len(s) and s[pos + 1] == "-" and s[pos + 2] != "]":
+            lo, hi = s[pos], s[pos + 2]
+            if ord(lo) > ord(hi):
+                raise ValueError(f"非法的字符范围 {lo}-{hi}")
+            chars.extend(chr(c) for c in range(ord(lo), ord(hi) + 1))
+            pos += 3
+        else:
+            chars.append(s[pos])
+            pos += 1
+    if pos >= len(s):
+        raise ValueError("未闭合的 '['")
+    if not chars:
+        raise ValueError("空的字符类 []")
+    return list(dict.fromkeys(chars)), pos + 1
+
+
+def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllable], list[tuple[int, int | None]]]:
+    # 量词以音节为粒度：* 任意次、+ 至少一次、{n}/{n,}/{n,m} 有界重复。
+    # . ? / 保留给开头的声韵调spec，任意音节用 SQL LIKE 风格的 _ 和 %。
+    sylls: list[pinyinparser.Syllable] = []
+    reps: list[tuple[int, int | None]] = []
+    buf: list[str] = []
+
+    def flush():
+        if not buf:
+            return
+        part = ppinst.parse("".join(buf))
+        buf.clear()
+        for syl in part:
+            sylls.append(syl)
+            reps.append((1, 1))
+
+    def quantify(rep: tuple[int, int | None], text: str):
+        if not reps:
+            raise ValueError(f"拼音量词 {text!r} 前没有可重复的音节")
+        if reps[-1] != (1, 1):
+            raise ValueError(f"拼音量词 {text!r} 不能重复作用于同一个音节")
+        reps[-1] = rep
+
+    i = 0
+    while i < len(s):
+        ch = s[i]
+        if ch in "' -":
+            flush()
+            i += 1
+        elif ch in LIKE_WILDCARDS:
+            flush()
+            reps.append(LIKE_WILDCARDS[ch])
+            sylls.append(ppinst.parse(".")[0])  # 任意音节
+            i += 1
+        elif ch in QUANTIFIERS:
+            flush()
+            quantify(QUANTIFIERS[ch], ch)
+            i += 1
+        elif ch == "{":
+            m = BRACE_QUANT_PAT.match(s, i)
             if m is None:
-                raise ValueError(f"不合法的拼音量词 @ {s[pos:]!r}")
+                raise ValueError(f"不合法的拼音量词 @ {s[i:]!r}")
             lo = int(m.group(1))
             if m.group(2) is None:
                 rep = (lo, lo)
@@ -284,269 +355,112 @@ class SPinyin(SchemaABC):
                 if lo > hi:
                     raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
                 rep = (lo, hi)
-            return rep, m.end()
-        return None, pos
+            flush()
+            quantify(rep, m.group(0))
+            i = m.end()
+        else:
+            buf.append(ch)
+            i += 1
+    flush()
+    return sylls, reps
 
-    @staticmethod
-    def _append_text(v: list, c: str) -> list:
-        if v and isinstance(v[-1], _PText):
-            return v[:-1] + [_PText(v[-1].text + c)]
-        return v + [_PText(c)]
 
-    @classmethod
-    def _cat(cls, v: list, a: list) -> list:
-        # 拼接两个节点序列；相邻字面量合并，使未量化括号仍按文本展开。
-        if not a:
-            return list(v)
-        if not v:
-            return list(a)
-        if isinstance(v[-1], _PText) and isinstance(a[0], _PText):
-            return v[:-1] + [_PText(v[-1].text + a[0].text)] + a[1:]
-        return v + a
+def spec_flags(
+    pinyins: list[pinyinparser.Syllable],
+    wcspec: str,
+    wcspecp: str,
+    wc_pairs: list[tuple[str, str]],
+):
+    if not wcspec and not wcspecp:
+        return False, False, False
 
-    @classmethod
-    def _expand_class(cls, s: str, pos: int) -> tuple[list[str], int]:
-        chars: list[str] = []
-        while pos < len(s) and s[pos] != "]":
-            if pos + 2 < len(s) and s[pos + 1] == "-" and s[pos + 2] != "]":
-                lo, hi = s[pos], s[pos + 2]
-                if ord(lo) > ord(hi):
-                    raise ValueError(f"非法的字符范围 {lo}-{hi}")
-                chars.extend(chr(c) for c in range(ord(lo), ord(hi) + 1))
-                pos += 3
-            else:
-                chars.append(s[pos])
-                pos += 1
-        if pos >= len(s):
-            raise ValueError("未闭合的 '['")
-        if not chars:
-            raise ValueError("空的字符类 []")
-        return list(dict.fromkeys(chars)), pos + 1
+    iws: list[bool] = []
+    fws: list[bool] = []
+    tws: list[bool] = []
+    for syl in pinyins:
+        wc = wcspec
+        syl_i = int(syl.initial)
+        syl_f = int(syl.final)
+        for w, tk in wc_pairs:
+            tv = WCSPEC_DCT.get(tk)
+            if tv is not None and (syl_i == tv or syl_f == tv):
+                wc = w
+                break
+        if not wc:
+            wc = "..."
 
-    @classmethod
-    def _parse_pinyin_query(cls, s: str) -> tuple[list[pinyinparser.Syllable], list[tuple[int, int | None]]]:
-        # 量词以音节为粒度：* 任意次、+ 至少一次、{n}/{n,}/{n,m} 有界重复。
-        # . ? / 保留给开头的声韵调spec，任意音节用 SQL LIKE 风格的 _ 和 %。
-        sylls: list[pinyinparser.Syllable] = []
-        reps: list[tuple[int, int | None]] = []
-        buf: list[str] = []
+        iws.append(wc[0] == "?")
+        if wc[0] == "/":
+            syl.initial = pinyinparser.Initial.unspec
+        fws.append(wc[1] == "?")
+        if wc[1] == "/":
+            syl.final = pinyinparser.Final.unspec
+        tws.append(wc[2] == "?")
+        if wc[2] == "/":
+            syl.tone = pinyinparser.Tone.unspec
 
-        def flush():
-            if not buf:
-                return
-            part = cls.ppinst.parse("".join(buf))
-            buf.clear()
-            for syl in part:
-                sylls.append(syl)
-                reps.append((1, 1))
+    logger.info(f"dbg: SPinyin {iws=} {fws=} {pinyins=}")
+    return iws, fws, tws
 
-        def quantify(rep: tuple[int, int | None], text: str):
-            if not reps:
-                raise ValueError(f"拼音量词 {text!r} 前没有可重复的音节")
-            if reps[-1] != (1, 1):
-                raise ValueError(f"拼音量词 {text!r} 不能重复作用于同一个音节")
-            reps[-1] = rep
 
-        i = 0
-        while i < len(s):
-            ch = s[i]
-            if ch in "' -":
-                flush()
-                i += 1
-            elif ch in cls._like_wildcards:
-                flush()
-                reps.append(cls._like_wildcards[ch])
-                sylls.append(cls.ppinst.parse(".")[0])  # 任意音节
-                i += 1
-            elif ch in cls._quantifiers:
-                flush()
-                quantify(cls._quantifiers[ch], ch)
-                i += 1
-            elif ch == "{":
-                m = cls._brace_quant_pat.match(s, i)
-                if m is None:
-                    raise ValueError(f"不合法的拼音量词 @ {s[i:]!r}")
-                lo = int(m.group(1))
-                if m.group(2) is None:
-                    rep = (lo, lo)
-                elif not m.group(2):
-                    rep = (lo, None)
-                else:
-                    hi = int(m.group(2))
-                    if lo > hi:
-                        raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
-                    rep = (lo, hi)
-                flush()
-                quantify(rep, m.group(0))
-                i = m.end()
-            else:
-                buf.append(ch)
-                i += 1
-        flush()
-        return sylls, reps
+def masks_for(
+    pinyinc: Pinyin,
+    pinyins: list[pinyinparser.Syllable],
+    wcspec: str,
+    wcspecp: str,
+    wc_pairs: list[tuple[str, str]],
+) -> tuple[np.ndarray, np.ndarray]:
+    iws, fws, tws = spec_flags(pinyins, wcspec, wcspecp, wc_pairs)
+    return pinyinc._build_masks(iws, fws, tws, pinyins)
 
-    def _spec_flags(
-        self,
-        pinyins: list[pinyinparser.Syllable],
-        wcspec: str,
-        wcspecp: str,
-        wc_pairs: list[tuple[str, str]],
-    ):
-        if not wcspec and not wcspecp:
-            return False, False, False
 
-        iws: list[bool] = []
-        fws: list[bool] = []
-        tws: list[bool] = []
-        for syl in pinyins:
-            wc = wcspec
-            syl_i = int(syl.initial)
-            syl_f = int(syl.final)
-            for w, tk in wc_pairs:
-                tv = self.wcspec_dct.get(tk)
-                if tv is not None and (syl_i == tv or syl_f == tv):
-                    wc = w
-                    break
-            if not wc:
-                wc = "..."
+def query_parsed(
+    pinyinc: Pinyin,
+    pinyins: list[pinyinparser.Syllable],
+    reps: list[tuple[int, int | None]] | None,
+    istart: int | None,
+    iend: int | None,
+    wcspec: str,
+    wcspecp: str,
+    wc_pairs: list[tuple[str, str]],
+) -> ArrayLike:
+    use_re = reps is not None and any(rep != (1, 1) for rep in reps)
 
-            iws.append(wc[0] == "?")
-            if wc[0] == "/":
-                syl.initial = self.pinyinparser.Initial.unspec
-            fws.append(wc[1] == "?")
-            if wc[1] == "/":
-                syl.final = self.pinyinparser.Final.unspec
-            tws.append(wc[2] == "?")
-            if wc[2] == "/":
-                syl.tone = self.pinyinparser.Tone.unspec
-
-        logger.info(f"dbg: SPinyin {iws=} {fws=} {pinyins=}")
-        return iws, fws, tws
-
-    def _masks_for(
-        self,
-        pinyinc: Pinyin,
-        pinyins: list[pinyinparser.Syllable],
-        wcspec: str,
-        wcspecp: str,
-        wc_pairs: list[tuple[str, str]],
-    ) -> tuple[np.ndarray, np.ndarray]:
-        iws, fws, tws = self._spec_flags(pinyins, wcspec, wcspecp, wc_pairs)
-        return pinyinc._build_masks(iws, fws, tws, pinyins)
-
-    def _query_parsed(
-        self,
-        pinyinc: Pinyin,
-        pinyins: list[pinyinparser.Syllable],
-        reps: list[tuple[int, int | None]] | None,
-        istart: int | None,
-        iend: int | None,
-        wcspec: str,
-        wcspecp: str,
-        wc_pairs: list[tuple[str, str]],
-    ) -> ArrayLike:
-        use_re = reps is not None and any(rep != (1, 1) for rep in reps)
-
-        if not wcspec and not wcspecp:
-            if use_re:
-                return pinyinc.query_re(istart, iend, False, False, False, pinyins, reps)  # type: ignore[arg-type]
-            return pinyinc.query(istart, iend, False, False, False, pinyins)
-
-        iws, fws, tws = self._spec_flags(pinyins, wcspec, wcspecp, wc_pairs)
+    if not wcspec and not wcspecp:
         if use_re:
-            return pinyinc.query_re(istart, iend, iws, fws, tws, pinyins, reps)  # type: ignore[arg-type]
-        return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
+            return pinyinc.query_re(istart, iend, False, False, False, pinyins, reps)  # type: ignore[arg-type]
+        return pinyinc.query(istart, iend, False, False, False, pinyins)
 
-    def _compile_nodes(
-        self,
-        nfa: _NFA,
-        pinyinc: Pinyin,
-        nodes: list,
-        wcspec: str,
-        wcspecp: str,
-        wc_pairs: list[tuple[str, str]],
-    ) -> tuple[int, int]:
-        frags: list[tuple[int, int]] = []
-        for node in nodes:
-            if isinstance(node, _PText):
-                sylls, reps = self._parse_pinyin_query(node.text)
-                and_np, xand_np = self._masks_for(pinyinc, sylls, wcspec, wcspecp, wc_pairs)
-                for (lo, hi), and_val, xand_val in zip(reps, and_np, xand_np):
-                    mid = nfa.add_mask(int(and_val), int(xand_val))
-                    frags.append(nfa.repeat(lambda mid=mid: nfa.token(mid), lo, hi))
-            else:
-                assert isinstance(node, _PGroup)
+    iws, fws, tws = spec_flags(pinyins, wcspec, wcspecp, wc_pairs)
+    if use_re:
+        return pinyinc.query_re(istart, iend, iws, fws, tws, pinyins, reps)  # type: ignore[arg-type]
+    return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
 
-                def factory(alts=node.alts):
-                    return nfa.alt(
-                        [self._compile_nodes(nfa, pinyinc, alt, wcspec, wcspecp, wc_pairs) for alt in alts]
-                    )
 
-                frags.append(nfa.repeat(factory, node.rep[0], node.rep[1]))
-        return nfa.seq(frags)
+def compile_nodes(
+    nfa: _NFA,
+    pinyinc: Pinyin,
+    nodes: list,
+    wcspec: str,
+    wcspecp: str,
+    wc_pairs: list[tuple[str, str]],
+    ppinst=PPINST,
+) -> tuple[int, int]:
+    frags: list[tuple[int, int]] = []
+    for node in nodes:
+        if isinstance(node, _PText):
+            sylls, reps = parse_pinyin_query(node.text, ppinst)
+            and_np, xand_np = masks_for(pinyinc, sylls, wcspec, wcspecp, wc_pairs)
+            for (lo, hi), and_val, xand_val in zip(reps, and_np, xand_np):
+                mid = nfa.add_mask(int(and_val), int(xand_val))
+                frags.append(nfa.repeat(lambda mid=mid: nfa.token(mid), lo, hi))
+        else:
+            assert isinstance(node, _PGroup)
 
-    def query(self, mch):
-        pinyinc = self.cols.pinyin
-
-        istart: int | None = (mch.group("start") or None) and int(mch.group("start"))
-        iend: int | None = (mch.group("end") or None) and int(mch.group("end"))
-
-        wcspecp = mch.group("wcspecp") or ""
-        wcspec = mch.group("wcspec") or ""
-        if wcspec and len(wcspec) == 2:
-            wcspec += "."
-
-        wc_pairs: list[tuple[str, str]] = self._wcpair_pat.findall(wcspecp)
-        wc_pairs = [(f"{w}." if len(w) == 2 else w, tk) for w, tk in wc_pairs]
-        logger.info(f"dbg: SPinyin {wcspec=} {wc_pairs=}")
-
-        if as_ := mch.group("as"):
-            pinyins = list(
-                self.pinyinparser.parse(
-                    "'".join(
-                        pypinyin.lazy_pinyin(
-                            as_,
-                            style=pypinyin.Style.TONE,
-                            neutral_tone_with_five=True,
-                            errors=lambda _: None,  # type: ignore
-                        )
-                    )
-                )
-            )
-            return self._query_parsed(pinyinc, pinyins, None, istart, iend, wcspec, wcspecp, wc_pairs)
-
-        pinyin: str = mch.group("pinyin") or ""
-        results: list[ArrayLike] = []
-        for pattern in self._parse_pinyin_pattern(pinyin):
-            if any(isinstance(node, _PGroup) for node in pattern):
-                nfa = _NFA()
-                start, accept = self._compile_nodes(nfa, pinyinc, pattern, wcspec, wcspecp, wc_pairs)
-                eps_off, eps_to, tok_off, tok_to, tok_mask, and16, xand16 = nfa.arrays()
-                results.append(
-                    pinyinc.query_re_nfa(
-                        istart,
-                        iend,
-                        and16,
-                        xand16,
-                        eps_off,
-                        eps_to,
-                        tok_off,
-                        tok_to,
-                        tok_mask,
-                        start,
-                        accept,
-                    )
-                )
-            else:
-                text = "".join(node.text for node in pattern if isinstance(node, _PText))
-                pinyins, reps = self._parse_pinyin_query(text)
-                results.append(
-                    self._query_parsed(pinyinc, pinyins, reps, istart, iend, wcspec, wcspecp, wc_pairs)
+            def factory(alts=node.alts):
+                return nfa.alt(
+                    [compile_nodes(nfa, pinyinc, alt, wcspec, wcspecp, wc_pairs, ppinst) for alt in alts]
                 )
 
-        result = results[0]
-        for r in results[1:]:
-            result = result | r
-        return result
-
-
+            frags.append(nfa.repeat(factory, node.rep[0], node.rep[1]))
+    return nfa.seq(frags)

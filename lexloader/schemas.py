@@ -2,18 +2,29 @@ import inspect
 import logging
 import re
 import time
+import types
+import typing
+from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from itertools import chain
 from typing import NamedTuple, cast
 
 import numba
 import numpy as np
+import pinyinparser
+import pypinyin
+import pypinyin_dict.phrase_pinyin_data.large_pinyin
+import pypinyin_dict.pinyin_data.cc_cedict
 import recheck
 from cachetools import LRUCache, TTLCache, cached
+
+pypinyin_dict.phrase_pinyin_data.large_pinyin.load()
+pypinyin_dict.pinyin_data.cc_cedict.load()
 
 if __package__:
     from .colproto import (
         ColProtoABC,
+        Pinyin,
         PlainText,
         SortedColABC,
         _Enum,
@@ -22,12 +33,29 @@ if __package__:
     )
     from .headparser import TColSpec
     from .nputil import find_first_equal_where_index_greater, find_first_true, get_k_ts
-    from .schema_base import SchemaABC, schema, schemas
-    from .spinyin import SPinyin
-    from .typing_utils import ArrayLike, asArrayLike
+    from .spinyin import (
+        BRACE_QUANT_PAT,
+        LIKE_WILDCARDS,
+        MAX_EXPAND,
+        PPINST,
+        QUANTIFIERS,
+        TOKENS_PAT,
+        WCPAIR_PAT,
+        WCPAIR_PAT_S,
+        WCSPEC_DCT,
+        _NFA,
+        _PGroup,
+        _PText,
+        compile_nodes,
+        parse_pinyin_pattern,
+        parse_pinyin_query,
+        query_parsed,
+    )
+    from .typing_utils import ArrayLike, AwkwardLike, asArrayLike
 else:
     from colproto import (
         ColProtoABC,
+        Pinyin,
         PlainText,
         SortedColABC,
         _Enum,
@@ -36,11 +64,69 @@ else:
     )
     from headparser import TColSpec
     from nputil import find_first_equal_where_index_greater, find_first_true, get_k_ts
-    from schema_base import SchemaABC, schema, schemas  # type: ignore
-    from spinyin import SPinyin  # type: ignore
-    from typing_utils import ArrayLike, asArrayLike
+    from spinyin import (  # type: ignore
+        BRACE_QUANT_PAT,
+        LIKE_WILDCARDS,
+        MAX_EXPAND,
+        PPINST,
+        QUANTIFIERS,
+        TOKENS_PAT,
+        WCPAIR_PAT,
+        WCPAIR_PAT_S,
+        WCSPEC_DCT,
+        _NFA,
+        _PGroup,
+        _PText,
+        compile_nodes,
+        parse_pinyin_pattern,
+        parse_pinyin_query,
+        query_parsed,
+    )
+    from typing_utils import ArrayLike, AwkwardLike, asArrayLike
 
 logger = logging.getLogger(__name__)
+
+
+schemas = []
+
+
+def schema(cls: type["SchemaABC"]) -> type["SchemaABC"]:
+    schemas.append(cls)
+    return cls
+
+
+class SchemaABC(ABC):
+    required_cols: type[NamedTuple]
+    query_re_pat: re.Pattern[str] = re.compile("")
+    group: str
+
+    @classmethod
+    def get_fields_req(cls) -> tuple[dict[str, type[ColProtoABC]], dict[str, type[ColProtoABC]]]:
+        anno = cls.required_cols.__annotations__
+        req: dict[str, type[ColProtoABC]] = {}
+        opt_req: dict[str, type[ColProtoABC]] = {}
+        for k, v in anno.items():
+            match typing.get_args(v):
+                case () if isinstance(v, type) and issubclass(v, ColProtoABC):
+                    req[k] = v
+                case (types.NoneType, t) | (t, types.NoneType) if isinstance(t, type) and issubclass(t, ColProtoABC):
+                    opt_req[k] = t
+                case _:
+                    raise SyntaxError("required_cols的每一项都必须注解为一个ColProto（必需列）或ColProto|None=None（可选列）。")
+        return req, opt_req
+
+    def __init__(self, cols: NamedTuple):
+        self.cols = cols
+
+    def match(self, s: str) -> re.Match | None:
+        return self.query_re_pat.match(s)
+
+    def checkinit(self):
+        # schema可以自定义checkinit检查初始化分配的列，返回False表示初始化不合法
+        return True
+
+    @abstractmethod
+    def query(self, mch: re.Match) -> AwkwardLike: ...
 
 
 class Schemas:
@@ -331,6 +417,102 @@ class Schemas:
 
 
 # region Schema s
+
+
+@schema
+class SPinyin(SchemaABC):
+    # pinyin可以jit但是建议aot
+    class required_cols(NamedTuple):
+        pinyin: Pinyin
+
+    cols: required_cols
+
+    import pinyinparser
+
+    ppinst = PPINST
+    wcspec_dct = WCSPEC_DCT
+
+    _tokens_pat = TOKENS_PAT
+    _wcpair_pat = WCPAIR_PAT
+
+    query_re_pat = re.compile(
+        rf":(((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({WCPAIR_PAT_S}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?((?P<as>~[^ ]+)|(?P<pinyin>(?![*+])[0123456789abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề' ?*+\-_%()|\[\]{{}},]+))))"
+    )
+
+    _quantifiers = QUANTIFIERS
+    _like_wildcards = LIKE_WILDCARDS
+    _brace_quant_pat = BRACE_QUANT_PAT
+    _max_expand = MAX_EXPAND
+
+    @staticmethod
+    def _parse_pinyin_pattern(s: str) -> list[list]:
+        return parse_pinyin_pattern(s)
+
+    @classmethod
+    def _parse_pinyin_query(cls, s: str) -> tuple[list[pinyinparser.Syllable], list[tuple[int, int | None]]]:
+        return parse_pinyin_query(s, cls.ppinst)
+
+    def query(self, mch):
+        pinyinc = self.cols.pinyin
+
+        istart: int | None = (mch.group("start") or None) and int(mch.group("start"))
+        iend: int | None = (mch.group("end") or None) and int(mch.group("end"))
+
+        wcspecp = mch.group("wcspecp") or ""
+        wcspec = mch.group("wcspec") or ""
+        if wcspec and len(wcspec) == 2:
+            wcspec += "."
+
+        wc_pairs: list[tuple[str, str]] = self._wcpair_pat.findall(wcspecp)
+        wc_pairs = [(f"{w}." if len(w) == 2 else w, tk) for w, tk in wc_pairs]
+        logger.info(f"dbg: SPinyin {wcspec=} {wc_pairs=}")
+
+        if as_ := mch.group("as"):
+            pinyins = list(
+                self.pinyinparser.parse(
+                    "'".join(
+                        pypinyin.lazy_pinyin(
+                            as_,
+                            style=pypinyin.Style.TONE,
+                            neutral_tone_with_five=True,
+                            errors=lambda _: None,  # type: ignore
+                        )
+                    )
+                )
+            )
+            return query_parsed(pinyinc, pinyins, None, istart, iend, wcspec, wcspecp, wc_pairs)
+
+        pinyin: str = mch.group("pinyin") or ""
+        results: list[ArrayLike] = []
+        for pattern in self._parse_pinyin_pattern(pinyin):
+            if any(isinstance(node, _PGroup) for node in pattern):
+                nfa = _NFA()
+                start, accept = compile_nodes(nfa, pinyinc, pattern, wcspec, wcspecp, wc_pairs, self.ppinst)
+                eps_off, eps_to, tok_off, tok_to, tok_mask, and16, xand16 = nfa.arrays()
+                results.append(
+                    pinyinc.query_re_nfa(
+                        istart,
+                        iend,
+                        and16,
+                        xand16,
+                        eps_off,
+                        eps_to,
+                        tok_off,
+                        tok_to,
+                        tok_mask,
+                        start,
+                        accept,
+                    )
+                )
+            else:
+                text = "".join(node.text for node in pattern if isinstance(node, _PText))
+                pinyins, reps = self._parse_pinyin_query(text)
+                results.append(query_parsed(pinyinc, pinyins, reps, istart, iend, wcspec, wcspecp, wc_pairs))
+
+        result = results[0]
+        for r in results[1:]:
+            result = result | r
+        return result
 
 
 @schema
