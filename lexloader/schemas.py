@@ -11,6 +11,7 @@ from typing import NamedTuple, cast
 
 import numba
 import numpy as np
+import pinyinparser
 import pypinyin
 import pypinyin_dict.phrase_pinyin_data.large_pinyin
 import pypinyin_dict.pinyin_data.cc_cedict
@@ -405,8 +406,48 @@ class SPinyin(SchemaABC):
     _wcpair_pat = re.compile(_wcpair_pat_s := f"([.?/]{{2,3}})({_tokens_pat})")
 
     query_re_pat = re.compile(
-        rf":(((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?((?P<as>~[^ ]+)|(?P<pinyin>[012345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề'?]+))))"
+        rf":(((?:\[(?P<start>-?[0-9]*):(?P<end>-?[0-9]*)\])?(?P<wcspecp>({_wcpair_pat_s}(?=[.?/]{{2,3}}))*)(?P<wcspec>[.?/]{{2,3}})?((?P<as>~[^ ]+)|(?P<pinyin>(?![*+])[012345abcdefghijklmnopqrstuvwxyzàáèéêìíòóùúüāēěīńňōūǎǐǒǔǖǘǚǜǹ̀́̄̌ḿếề' ?*+\-_%]+))))"
     )
+
+    _quantifiers = {"*": (0, None), "+": (1, None)}
+    # SQL LIKE 风格的通配：_ 是任意一个音节，% 是任意个（含0个）音节，二者本身无需前置音节
+    _like_wildcards = {"_": (1, 1), "%": (0, None)}
+
+    @classmethod
+    def _parse_pinyin_query(cls, s: str) -> tuple[list[pinyinparser.Syllable], list[tuple[int, int | None]]]:
+        # 量词以音节为粒度：* 表示前一个音节出现任意次，+ 表示至少一次。
+        # . ? / 保留给开头的声韵调spec，任意音节用 SQL LIKE 风格的 _ 和 %。
+        sylls: list[pinyinparser.Syllable] = []
+        reps: list[tuple[int, int | None]] = []
+        buf: list[str] = []
+
+        def flush():
+            if not buf:
+                return
+            part = cls.ppinst.parse("".join(buf))
+            buf.clear()
+            for syl in part:
+                sylls.append(syl)
+                reps.append((1, 1))
+
+        for ch in s:
+            if ch in "' -":
+                flush()
+            elif ch in cls._like_wildcards:
+                flush()
+                reps.append(cls._like_wildcards[ch])
+                sylls.append(cls.ppinst.parse(".")[0])  # 任意音节
+            elif ch in cls._quantifiers:
+                flush()
+                if not reps:
+                    raise ValueError(f"拼音量词 {ch!r} 前没有可重复的音节")
+                if reps[-1] != (1, 1):
+                    raise ValueError(f"拼音量词 {ch!r} 不能重复作用于同一个音节")
+                reps[-1] = cls._quantifiers[ch]
+            else:
+                buf.append(ch)
+        flush()
+        return sylls, reps
 
     def query(self, mch):
         pinyinc = self.cols.pinyin
@@ -422,16 +463,21 @@ class SPinyin(SchemaABC):
                     )
                 )
             )
+            reps: list[tuple[int, int | None]] | None = None
         else:
             pinyin: str = mch.group("pinyin") or ""
-            pinyins = self.ppinst.parse(pinyin)
+            pinyins, reps = self._parse_pinyin_query(pinyin)
         istart: int | None = (mch.group("start") or None) and int(mch.group("start"))
         iend: int | None = (mch.group("end") or None) and int(mch.group("end"))
 
         wcspecp = mch.group("wcspecp") or ""
         wcspec = mch.group("wcspec") or ""
 
+        use_re = reps is not None and any(rep != (1, 1) for rep in reps)
+
         if not wcspec and not wcspecp:
+            if use_re:
+                return pinyinc.query_re(istart, iend, False, False, False, pinyins, reps)  # type: ignore[arg-type]
             return pinyinc.query(istart, iend, False, False, False, pinyins)
 
         if wcspec and len(wcspec) == 2:
@@ -468,6 +514,8 @@ class SPinyin(SchemaABC):
                 syl.tone = self.pinyinparser.Tone.unspec
 
         logger.info(f"dbg: SPinyin {iws=} {fws=} {pinyins=}")
+        if use_re:
+            return pinyinc.query_re(istart, iend, iws, fws, tws, pinyins, reps)  # type: ignore[arg-type]
         return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
 
 

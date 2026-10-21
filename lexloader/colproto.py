@@ -658,19 +658,67 @@ class Pinyin(ColProtoABC[list[int]]):
     ):
         __p_check(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x)
 
-    def query(
+    @staticmethod
+    @numba.njit(parallel=True, cache=NUMBA_FILE_CACHE)
+    def __p_check_re(offsets, data16, m: int | None, n: int | None, and16, xand16, rmin, rmax):
+        # 与__p_check的区间语义一致，但允许每个音节重复rmin~rmax次（拼音正则量词）
+        nstring = len(offsets) - 1
+        k = len(and16)
+        result = np.zeros(nstring, dtype=np.bool_)
+        for i in numba.prange(nstring):
+            lo = offsets[i]
+            length = offsets[i + 1] - lo
+
+            if m is None:
+                start = 0
+            elif m >= 0:
+                start = m
+            else:
+                start = length + m
+            if n is None:
+                end = length
+            elif n >= 0:
+                end = n
+            else:
+                end = length + n
+
+            if start < 0 or end > length or start > end:
+                continue
+
+            rlen = end - start
+            dp = np.zeros(rlen + 1, dtype=np.bool_)
+            ndp = np.zeros(rlen + 1, dtype=np.bool_)
+            dp[0] = True
+            for t in range(k):
+                for p in range(rlen + 1):
+                    ndp[p] = False
+                for p in range(rlen + 1):
+                    if not dp[p]:
+                        continue
+                    if rmin[t] == 0:
+                        ndp[p] = True
+                    q = p
+                    c = 0
+                    while c < rmax[t] and q < rlen:
+                        if (data16[lo + start + q] & and16[t]) == xand16[t]:
+                            q += 1
+                            c += 1
+                            if c >= rmin[t]:
+                                ndp[q] = True
+                        else:
+                            break
+                for p in range(rlen + 1):
+                    dp[p] = ndp[p]
+            result[i] = dp[rlen]
+        return result
+
+    def _build_masks(
         self,
-        m: int | None,
-        n: int | None,
         iw: Iterable[bool] | bool,
         fw: Iterable[bool] | bool,
         tw: Iterable[bool] | bool,
         s: Iterable[Syllable],
-    ) -> ArrayLike:
-        logger.info(f"CPinyin query m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
-        offset: ArrayLike = self.data.layout.offsets.data
-        data: ArrayLike = self.data.layout.content.data
-
+    ) -> tuple[np.ndarray, np.ndarray]:
         and_lst: list[np.uint16] = []
         xor_lst: list[np.uint16] = []
 
@@ -692,12 +740,51 @@ class Pinyin(ColProtoABC[list[int]]):
             and_lst.append(np.uint16(and_val))
             xor_lst.append(np.uint16(xor_val))
 
-        logger.info(f"CPinyin query and={and_lst!r} xor={xor_lst!r}")
-
         and_np = np.array(and_lst, dtype=np.uint16)
         xand_np = np.array(xor_lst, dtype=np.uint16) & and_np
 
+        logger.info(f"CPinyin query and={and_lst!r} xor={xor_lst!r}")
+        return and_np, xand_np
+
+    def query(
+        self,
+        m: int | None,
+        n: int | None,
+        iw: Iterable[bool] | bool,
+        fw: Iterable[bool] | bool,
+        tw: Iterable[bool] | bool,
+        s: Iterable[Syllable],
+    ) -> ArrayLike:
+        logger.info(f"CPinyin query m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
+        offset: ArrayLike = self.data.layout.offsets.data
+        data: ArrayLike = self.data.layout.content.data
+
+        and_np, xand_np = self._build_masks(iw, fw, tw, s)
+
         return asArrayLike(self.__p_check(offset, data, m, n, and_np, xand_np))
+
+    def query_re(
+        self,
+        m: int | None,
+        n: int | None,
+        iw: Iterable[bool] | bool,
+        fw: Iterable[bool] | bool,
+        tw: Iterable[bool] | bool,
+        s: Iterable[Syllable],
+        reps: Iterable[tuple[int, int | None]],
+    ) -> ArrayLike:
+        logger.info(f"CPinyin query_re m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}, reps={reps!r}")
+        offset: ArrayLike = self.data.layout.offsets.data
+        data: ArrayLike = self.data.layout.content.data
+        reps = list(reps)
+
+        and_np, xand_np = self._build_masks(iw, fw, tw, s)
+        if len(reps) != len(and_np):
+            raise ValueError(f"reps与音节数量不一致: {len(reps)} != {len(and_np)}")
+        rmin = np.array([lo for lo, _ in reps], dtype=np.int32)
+        rmax = np.array([np.iinfo(np.int32).max if hi is None else hi for _, hi in reps], dtype=np.int32)
+
+        return asArrayLike(self.__p_check_re(offset, data, m, n, and_np, xand_np, rmin, rmax))
 
 
 class _Enum(_Int):
