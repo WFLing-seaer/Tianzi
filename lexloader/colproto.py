@@ -665,6 +665,10 @@ class Pinyin(ColProtoABC[list[int]]):
         nstring = len(offsets) - 1
         k = len(and16)
         result = np.zeros(nstring, dtype=np.bool_)
+        # __p_check对“负起点+非负终点”抛IndexError，正则路径同样在规范化前拒绝，
+        # 否则规范化后可能得到空区间而被当成匹配。
+        if m is not None and m < 0 and n is not None and n >= 0:
+            raise IndexError
         for i in numba.prange(nstring):
             lo = offsets[i]
             length = offsets[i + 1] - lo
@@ -687,28 +691,43 @@ class Pinyin(ColProtoABC[list[int]]):
 
             rlen = end - start
             dp = np.zeros(rlen + 1, dtype=np.bool_)
-            ndp = np.zeros(rlen + 1, dtype=np.bool_)
+            match = np.zeros(rlen, dtype=np.bool_)
+            run_end = np.zeros(rlen + 1, dtype=np.int64)
+            diff = np.zeros(rlen + 2, dtype=np.int32)
             dp[0] = True
+
             for t in range(k):
-                for p in range(rlen + 1):
-                    ndp[p] = False
+                # 先算出每个位置起最长的连续匹配段；从位置p出发能到达的是
+                # [p, p+min(rmax, run_end[p]-p)] 这一整段（rmin>0时从p+rmin开始）。
+                # 用差分数组一次性合并所有可达区间，避免从每个可达位置反复扫描
+                # 剩余序列（连续%会退化成O(n^2)）。
+                for q in range(rlen):
+                    match[q] = (data16[lo + start + q] & and16[t]) == xand16[t]
+                run_end[rlen] = rlen
+                for q in range(rlen - 1, -1, -1):
+                    run_end[q] = run_end[q + 1] if match[q] else q
+
+                for q in range(rlen + 2):
+                    diff[q] = 0
                 for p in range(rlen + 1):
                     if not dp[p]:
                         continue
+                    maxc = run_end[p] - p
+                    if rmax[t] < maxc:
+                        maxc = rmax[t]
                     if rmin[t] == 0:
-                        ndp[p] = True
-                    q = p
-                    c = 0
-                    while c < rmax[t] and q < rlen:
-                        if (data16[lo + start + q] & and16[t]) == xand16[t]:
-                            q += 1
-                            c += 1
-                            if c >= rmin[t]:
-                                ndp[q] = True
-                        else:
-                            break
+                        # 可以一个都不消费
+                        diff[p] += 1
+                        diff[p + maxc + 1] -= 1
+                    elif maxc >= rmin[t]:
+                        diff[p + rmin[t]] += 1
+                        diff[p + maxc + 1] -= 1
+
+                acc = 0
                 for p in range(rlen + 1):
-                    dp[p] = ndp[p]
+                    acc += diff[p]
+                    dp[p] = acc > 0
+
             result[i] = dp[rlen]
         return result
 
@@ -781,8 +800,8 @@ class Pinyin(ColProtoABC[list[int]]):
         and_np, xand_np = self._build_masks(iw, fw, tw, s)
         if len(reps) != len(and_np):
             raise ValueError(f"reps与音节数量不一致: {len(reps)} != {len(and_np)}")
-        rmin = np.array([lo for lo, _ in reps], dtype=np.int32)
-        rmax = np.array([np.iinfo(np.int32).max if hi is None else hi for _, hi in reps], dtype=np.int32)
+        rmin = np.array([lo for lo, _ in reps], dtype=np.int64)
+        rmax = np.array([np.iinfo(np.int64).max if hi is None else hi for _, hi in reps], dtype=np.int64)
 
         return asArrayLike(self.__p_check_re(offset, data, m, n, and_np, xand_np, rmin, rmax))
 
