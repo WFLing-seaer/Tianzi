@@ -48,6 +48,7 @@ from regex import escape
 from . import aliasutil, lexloader, randutil
 from .cacheutil import Cache
 from .fontutil import fonts
+from .lexloader.queryerrors import QueryRangeError, QuerySyntaxError, QueryTooComplexError
 from .numutil import NSLVL, Value, numfmt, numify, numsify, numsify_any, numsimp
 from .pysandbox import RETVAL_MISSING, Sandbox
 from .randutil import rngs, rsgs
@@ -1824,6 +1825,24 @@ async def Lex(self: Tianzi, mch: SupportsGroup) -> SupportsStr:
             return bo(mch)
         try:
             target = lex.schemas.query_pop(query)
+        except QueryTooComplexError as e:
+            return self.breakout(
+                mch,
+                "[E60.8查询过于复杂]",
+                f"{{d}} - 查询「{query}」过于复杂：{e} (E60.8)\n请简化查询后重试。",
+            )
+        except QueryRangeError as e:
+            return self.breakout(
+                mch,
+                "[E73.21c查询区间越界]",
+                f"{{d}} - 查询「{query}」的区间非法：{e} (E73.21c)",
+            )
+        except QuerySyntaxError as e:
+            return self.breakout(
+                mch,
+                "[E43.4查询语法无效]",
+                f"{{d}} - 查询「{query}」语法无效：{e} (E43.4)",
+            )
         except SyntaxError:
             return self.breakout(
                 mch,

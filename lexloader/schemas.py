@@ -50,7 +50,9 @@ if __package__:
         parse_pinyin_pattern,
         parse_pinyin_query,
         query_parsed,
+        query_range_error,
     )
+    from .queryerrors import QuerySyntaxError
     from .typing_utils import ArrayLike, AwkwardLike, asArrayLike
 else:
     from colproto import (
@@ -81,7 +83,9 @@ else:
         parse_pinyin_pattern,
         parse_pinyin_query,
         query_parsed,
+        query_range_error,
     )
+    from queryerrors import QuerySyntaxError  # type: ignore
     from typing_utils import ArrayLike, AwkwardLike, asArrayLike
 
 logger = logging.getLogger(__name__)
@@ -288,10 +292,11 @@ class Schemas:
                         try:
                             part_result = schema_inst.query(m)
                         except (ValueError, IndexError) as e:
-                            # 匹配到的片段解析失败同样属于查询语法错误，
-                            # 与下方“没有任何schema匹配”统一为SyntaxError。
+                            # 匹配到的片段解析失败属于查询语法错误（E43.4）；
+                            # QueryTooComplexError/QueryRangeError本身就是SyntaxError，
+                            # 会保留类型继续上抛，由translator分配更具体的错误码。
                             detail = f": {e}" if str(e) else ""
-                            raise SyntaxError(f"不合法的查询 @ {remaining}{detail}") from e
+                            raise QuerySyntaxError(f"不合法的查询 @ {remaining}{detail}") from e
                         tq = (time.perf_counter() - t1) * 1000
                         result = result & part_result
                         remaining = remaining[m.end() :]
@@ -474,18 +479,21 @@ class SPinyin(SchemaABC):
         logger.info(f"dbg: SPinyin {wcspec=} {wc_pairs=}")
 
         if as_ := mch.group("as"):
-            pinyins = list(
-                self.pinyinparser.parse(
-                    "'".join(
-                        pypinyin.lazy_pinyin(
-                            as_,
-                            style=pypinyin.Style.TONE,
-                            neutral_tone_with_five=True,
-                            errors=lambda _: None,  # type: ignore
+            try:
+                pinyins = list(
+                    self.pinyinparser.parse(
+                        "'".join(
+                            pypinyin.lazy_pinyin(
+                                as_,
+                                style=pypinyin.Style.TONE,
+                                neutral_tone_with_five=True,
+                                errors=lambda _: None,  # type: ignore
+                            )
                         )
                     )
                 )
-            )
+            except ValueError as e:
+                raise QuerySyntaxError(f"不合法的拼音片段 {as_!r}: {e}") from e
             return query_parsed(pinyinc, pinyins, None, istart, iend, wcspec, wcspecp, wc_pairs)
 
         pinyin: str = mch.group("pinyin") or ""
@@ -495,21 +503,24 @@ class SPinyin(SchemaABC):
                 nfa = NFA()
                 start, accept = compile_nodes(nfa, pinyinc, pattern, wcspec, wcspecp, wc_pairs, self.ppinst)
                 eps_off, eps_to, tok_off, tok_to, tok_mask, and16, xand16 = nfa.arrays()
-                results.append(
-                    pinyinc.query_re_nfa(
-                        istart,
-                        iend,
-                        and16,
-                        xand16,
-                        eps_off,
-                        eps_to,
-                        tok_off,
-                        tok_to,
-                        tok_mask,
-                        start,
-                        accept,
+                try:
+                    results.append(
+                        pinyinc.query_re_nfa(
+                            istart,
+                            iend,
+                            and16,
+                            xand16,
+                            eps_off,
+                            eps_to,
+                            tok_off,
+                            tok_to,
+                            tok_mask,
+                            start,
+                            accept,
+                        )
                     )
-                )
+                except (ValueError, IndexError) as e:
+                    raise query_range_error(istart, iend, e) from e
             else:
                 text = "".join(node.text for node in pattern if isinstance(node, _PText))
                 pinyins, reps = self._parse_pinyin_query(text)

@@ -8,10 +8,12 @@ import pinyinparser
 if __package__:
     from .colproto import Pinyin
     from .nfautil import NFA
+    from .queryerrors import QueryRangeError, QuerySyntaxError, QueryTooComplexError
     from .typing_utils import ArrayLike
 else:
     from colproto import Pinyin  # type: ignore
     from nfautil import NFA  # type: ignore
+    from queryerrors import QueryRangeError, QuerySyntaxError, QueryTooComplexError  # type: ignore
     from typing_utils import ArrayLike  # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -93,7 +95,7 @@ def parse_pinyin_pattern(s: str) -> list[list]:
     # 带量词的括号/字符类保留为_PGroup，量词作用于整组。
     variants, pos = parse_pat_seq(s, 0, "")
     if pos != len(s):
-        raise ValueError(f"不合法的拼音查询 @ {s[pos:]!r}")
+        raise QuerySyntaxError(f"不合法的拼音查询 @ {s[pos:]!r}")
     uniq: list[list] = []
     seen: set[tuple] = set()
     for v in variants:
@@ -110,8 +112,8 @@ def pat_key(pattern: list) -> tuple:
     )
 
 
-def _too_many_branches() -> ValueError:
-    return ValueError(f"拼音查询的分支过多（上限 {MAX_EXPAND}）")
+def _too_many_branches() -> QueryTooComplexError:
+    return QueryTooComplexError(f"拼音查询的分支过多（上限 {MAX_EXPAND}）")
 
 
 def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
@@ -143,14 +145,14 @@ def parse_pat_seq(s: str, pos: int, stops: str) -> tuple[list[list], int]:
                 variants = [v + [_PGroup(alts, rep)] for v in variants]
                 pos = npos
         elif ch in ")]|":
-            raise ValueError(f"不匹配的 {ch!r}")
+            raise QuerySyntaxError(f"不匹配的 {ch!r}")
         else:
             variants = [append_text(v, ch) for v in variants]
             pos += 1
         if len(variants) > MAX_EXPAND:
             raise _too_many_branches()
     if stops:
-        raise ValueError("未闭合的 '('")
+        raise QuerySyntaxError("未闭合的 '('")
     return variants, pos
 
 
@@ -163,7 +165,7 @@ def parse_pat_alt(s: str, pos: int) -> tuple[list[list], int]:
         if len(alts) > MAX_EXPAND:
             raise _too_many_branches()
     if pos >= len(s):
-        raise ValueError("未闭合的 '('")
+        raise QuerySyntaxError("未闭合的 '('")
     return alts, pos + 1
 
 
@@ -180,7 +182,7 @@ def parse_brace_quant(s: str, pos: int) -> tuple[tuple[int, int | None], int] | 
     else:
         hi = int(m.group(2))
         if lo > hi:
-            raise ValueError(f"拼音量词范围非法: {m.group(0)!r}")
+            raise QuerySyntaxError(f"拼音量词范围非法: {m.group(0)!r}")
         rep = (lo, hi)
     return rep, m.end()
 
@@ -196,7 +198,7 @@ def parse_pat_quant(s: str, pos: int) -> tuple[tuple[int, int | None] | None, in
     if ch == "{":
         ret = parse_brace_quant(s, pos)
         if ret is None:
-            raise ValueError(f"不合法的拼音量词 @ {s[pos:]!r}")
+            raise QuerySyntaxError(f"不合法的拼音量词 @ {s[pos:]!r}")
         return ret
     return None, pos
 
@@ -224,30 +226,38 @@ def expand_class(s: str, pos: int) -> tuple[list[str], int]:
         if pos + 2 < len(s) and s[pos + 1] == "-" and s[pos + 2] != "]":
             lo, hi = s[pos], s[pos + 2]
             if ord(lo) > ord(hi):
-                raise ValueError(f"非法的字符范围 {lo}-{hi}")
+                raise QuerySyntaxError(f"非法的字符范围 {lo}-{hi}")
             chars.extend(chr(c) for c in range(ord(lo), ord(hi) + 1))
             pos += 3
         else:
             chars.append(s[pos])
             pos += 1
     if pos >= len(s):
-        raise ValueError("未闭合的 '['")
+        raise QuerySyntaxError("未闭合的 '['")
     if not chars:
-        raise ValueError("空的字符类 []")
+        raise QuerySyntaxError("空的字符类 []")
     chars = list(dict.fromkeys(chars))
     kinds: dict[str, CharKind] = {}
     for ch in chars:
         kind = char_kind(ch)
         if kind is None:
-            raise ValueError(f"字符类中的 {ch!r} 不是合法的拼音片段")
+            raise QuerySyntaxError(f"字符类中的 {ch!r} 不是合法的拼音片段")
         kinds[ch] = kind
     first = chars[0]
     for ch in chars[1:]:
         if kinds[ch] != kinds[first]:
-            raise ValueError(
+            raise QuerySyntaxError(
                 f"字符类中的字符必须属于同一类（声母/韵母/声调）: {first!r} 是{kinds[first]}，{ch!r} 是{kinds[ch]}，不能出现在同一位置"
             )
     return chars, pos + 1
+
+
+def parse_syllables(text: str, ppinst=PPINST) -> list[pinyinparser.Syllable]:
+    # pinyinparser对非法片段抛ValueError；统一转成查询语法错误，便于分配错误码。
+    try:
+        return ppinst.parse(text)
+    except ValueError as e:
+        raise QuerySyntaxError(f"不合法的拼音片段 {text!r}: {e}") from e
 
 
 def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllable], list[tuple[int, int | None]]]:
@@ -260,7 +270,7 @@ def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllabl
     def flush():
         if not buf:
             return
-        part = ppinst.parse("".join(buf))
+        part = parse_syllables("".join(buf), ppinst)
         buf.clear()
         for syl in part:
             sylls.append(syl)
@@ -268,9 +278,9 @@ def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllabl
 
     def quantify(rep: tuple[int, int | None], text: str):
         if not reps:
-            raise ValueError(f"拼音量词 {text!r} 前没有可重复的音节")
+            raise QuerySyntaxError(f"拼音量词 {text!r} 前没有可重复的音节")
         if reps[-1] != (1, 1):
-            raise ValueError(f"拼音量词 {text!r} 不能重复作用于同一个音节")
+            raise QuerySyntaxError(f"拼音量词 {text!r} 不能重复作用于同一个音节")
         reps[-1] = rep
 
     i = 0
@@ -282,7 +292,7 @@ def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllabl
         elif ch in LIKE_WILDCARDS:
             flush()
             reps.append(LIKE_WILDCARDS[ch])
-            sylls.append(ppinst.parse(".")[0])  # 任意音节
+            sylls.append(parse_syllables(".", ppinst)[0])  # 任意音节
             i += 1
         elif ch in QUANTIFIERS:
             flush()
@@ -291,7 +301,7 @@ def parse_pinyin_query(s: str, ppinst=PPINST) -> tuple[list[pinyinparser.Syllabl
         elif ch == "{":
             ret = parse_brace_quant(s, i)
             if ret is None:
-                raise ValueError(f"不合法的拼音量词 @ {s[i:]!r}")
+                raise QuerySyntaxError(f"不合法的拼音量词 @ {s[i:]!r}")
             rep, end = ret
             flush()
             quantify(rep, s[i:end])
@@ -352,6 +362,18 @@ def masks_for(
     return pinyinc._build_masks(iws, fws, tws, pinyins)
 
 
+def query_range_error(istart: int | None, iend: int | None, e: Exception) -> QueryRangeError:
+    # 内核只抛裸ValueError/IndexError，这里补上可读原因，供E73.21c展示。
+    lo = "开头" if istart is None else str(istart)
+    hi = "末尾" if iend is None else str(iend)
+    reason = (
+        "负数起点不能与非负终点同时使用"
+        if isinstance(e, IndexError)
+        else "终点不能小于起点，且区间宽度必须与查询的音节数一致"
+    )
+    return QueryRangeError(f"查询区间 [{lo}:{hi}] 非法：{reason}")
+
+
 def query_parsed(
     pinyinc: Pinyin,
     pinyins: list[pinyinparser.Syllable],
@@ -364,15 +386,18 @@ def query_parsed(
 ) -> ArrayLike:
     use_re = reps is not None and any(rep != (1, 1) for rep in reps)
 
-    if not wcspec and not wcspecp:
-        if use_re:
-            return pinyinc.query_re(istart, iend, False, False, False, pinyins, reps)  # type: ignore[arg-type]
-        return pinyinc.query(istart, iend, False, False, False, pinyins)
+    try:
+        if not wcspec and not wcspecp:
+            if use_re:
+                return pinyinc.query_re(istart, iend, False, False, False, pinyins, reps)  # type: ignore[arg-type]
+            return pinyinc.query(istart, iend, False, False, False, pinyins)
 
-    iws, fws, tws = spec_flags(pinyins, wcspec, wcspecp, wc_pairs)
-    if use_re:
-        return pinyinc.query_re(istart, iend, iws, fws, tws, pinyins, reps)  # type: ignore[arg-type]
-    return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
+        iws, fws, tws = spec_flags(pinyins, wcspec, wcspecp, wc_pairs)
+        if use_re:
+            return pinyinc.query_re(istart, iend, iws, fws, tws, pinyins, reps)  # type: ignore[arg-type]
+        return pinyinc.query(istart, iend, iws, fws, tws, pinyins)
+    except (ValueError, IndexError) as e:
+        raise query_range_error(istart, iend, e) from e
 
 
 def compile_nodes(

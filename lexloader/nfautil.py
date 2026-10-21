@@ -1,5 +1,10 @@
 import numpy as np
 
+if __package__:
+    from .queryerrors import QuerySyntaxError, QueryTooComplexError
+else:
+    from queryerrors import QuerySyntaxError, QueryTooComplexError  # type: ignore
+
 
 class NFA:
     # 通用Thompson NFA构造器：token边消费一个符号，ε边表示选择、可选和重复。
@@ -21,7 +26,7 @@ class NFA:
         s = self.n
         self.n += 1
         if self.n > self.max_states:
-            raise ValueError(f"查询过于复杂（状态数上限 {self.max_states}）")
+            raise QueryTooComplexError(f"查询过于复杂（状态数上限 {self.max_states}）")
         return s
 
     def add_mask(self, and_val: int, xand_val: int) -> int:
@@ -39,7 +44,7 @@ class NFA:
     def token_edge(self, a: int, b: int, mask: int):
         self.tok_copies += 1
         if self.tok_copies > self.max_tokens:
-            raise ValueError(f"查询过于复杂（token数上限 {self.max_tokens}）")
+            raise QueryTooComplexError(f"查询过于复杂（token数上限 {self.max_tokens}）")
         self.toks.append((a, b, mask))
 
     def empty(self) -> tuple[int, int]:
@@ -87,7 +92,7 @@ class NFA:
             frags.append(self.star(factory))
         else:
             if hi < lo:
-                raise ValueError(f"量词范围非法: {{{lo},{hi}}}")
+                raise QuerySyntaxError(f"量词范围非法: {{{lo},{hi}}}")
             for _ in range(hi - lo):
                 fs, fa = factory()
                 self.eps_edge(fs, fa)  # 可跳过这一份
