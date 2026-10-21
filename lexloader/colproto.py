@@ -546,6 +546,21 @@ class Complex128(_Complex):
         return ak.Array(np.array(raw, dtype=np.complex128))
 
 
+@numba.njit(inline="always")
+def _nfa_close(cur, stack, top, eps_off, eps_to):
+    # 在已标记的种子状态上求ε闭包。每个状态至多入栈一次，栈深不超过状态数。
+    while top > 0:
+        top -= 1
+        s = stack[top]
+        for ei in range(eps_off[s], eps_off[s + 1]):
+            d = eps_to[ei]
+            if not cur[d]:
+                cur[d] = True
+                stack[top] = d
+                top += 1
+    return top
+
+
 class Pinyin(ColProtoABC[list[int]]):
     @staticmethod
     def tostr(val: list[int]) -> str:
@@ -731,6 +746,80 @@ class Pinyin(ColProtoABC[list[int]]):
             result[i] = dp[rlen]
         return result
 
+    @staticmethod
+    @numba.njit(parallel=True, cache=NUMBA_FILE_CACHE)
+    def __p_check_nfa(
+        offsets,
+        data16,
+        m: int | None,
+        n: int | None,
+        and16,
+        xand16,
+        eps_off,
+        eps_to,
+        tok_off,
+        tok_to,
+        tok_mask,
+        start,
+        accept,
+    ):
+        # 与__p_check/__p_check_re的区间语义一致，但用NFA表示括号组的整体重复：
+        # 每个目标音节消费一条token边，ε边处理选择、可选项和星号。
+        if m is not None and m < 0 and n is not None and n >= 0:
+            raise IndexError
+        nstring = len(offsets) - 1
+        nstate = len(eps_off) - 1
+        result = np.zeros(nstring, dtype=np.bool_)
+        for i in numba.prange(nstring):
+            lo = offsets[i]
+            length = offsets[i + 1] - lo
+
+            if m is None:
+                pos = 0
+            elif m >= 0:
+                pos = m
+            else:
+                pos = length + m
+            if n is None:
+                end = length
+            elif n >= 0:
+                end = n
+            else:
+                end = length + n
+
+            if pos < 0 or end > length or pos > end:
+                continue
+
+            cur = np.zeros(nstate, dtype=np.bool_)
+            nxt = np.zeros(nstate, dtype=np.bool_)
+            stack = np.zeros(nstate, dtype=np.int64)
+            cur[start] = True
+            stack[0] = start
+            _nfa_close(cur, stack, 1, eps_off, eps_to)
+
+            for q in range(end - pos):
+                for s in range(nstate):
+                    nxt[s] = False
+                top = 0
+                sym = data16[lo + pos + q]
+                for s in range(nstate):
+                    if not cur[s]:
+                        continue
+                    for ti in range(tok_off[s], tok_off[s + 1]):
+                        t = tok_mask[ti]
+                        if (sym & and16[t]) == xand16[t]:
+                            d = tok_to[ti]
+                            if not nxt[d]:
+                                nxt[d] = True
+                                stack[top] = d
+                                top += 1
+                _nfa_close(nxt, stack, top, eps_off, eps_to)
+                for s in range(nstate):
+                    cur[s] = nxt[s]
+
+            result[i] = cur[accept]
+        return result
+
     def _build_masks(
         self,
         iw: Iterable[bool] | bool,
@@ -804,6 +893,29 @@ class Pinyin(ColProtoABC[list[int]]):
         rmax = np.array([np.iinfo(np.int64).max if hi is None else hi for _, hi in reps], dtype=np.int64)
 
         return asArrayLike(self.__p_check_re(offset, data, m, n, and_np, xand_np, rmin, rmax))
+
+    def query_re_nfa(
+        self,
+        m: int | None,
+        n: int | None,
+        and16: np.ndarray,
+        xand16: np.ndarray,
+        eps_off: np.ndarray,
+        eps_to: np.ndarray,
+        tok_off: np.ndarray,
+        tok_to: np.ndarray,
+        tok_mask: np.ndarray,
+        start: int,
+        accept: int,
+    ) -> ArrayLike:
+        logger.info(f"CPinyin query_re_nfa m={m!r}, n={n!r}, nstate={len(eps_off) - 1}")
+        offset: ArrayLike = self.data.layout.offsets.data
+        data: ArrayLike = self.data.layout.content.data
+        return asArrayLike(
+            self.__p_check_nfa(
+                offset, data, m, n, and16, xand16, eps_off, eps_to, tok_off, tok_to, tok_mask, start, accept
+            )
+        )
 
 
 class _Enum(_Int):
