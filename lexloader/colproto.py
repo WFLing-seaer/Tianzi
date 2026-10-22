@@ -546,6 +546,21 @@ class Complex128(_Complex):
         return ak.Array(np.array(raw, dtype=np.complex128))
 
 
+@numba.njit(inline="always")
+def _nfa_close(cur, stack, top, eps_off, eps_to):
+    # 在已标记的种子状态上求ε闭包。每个状态至多入栈一次，栈深不超过状态数。
+    while top > 0:
+        top -= 1
+        s = stack[top]
+        for ei in range(eps_off[s], eps_off[s + 1]):
+            d = eps_to[ei]
+            if not cur[d]:
+                cur[d] = True
+                stack[top] = d
+                top += 1
+    return top
+
+
 class Pinyin(ColProtoABC[list[int]]):
     @staticmethod
     def tostr(val: list[int]) -> str:
@@ -650,6 +665,7 @@ class Pinyin(ColProtoABC[list[int]]):
     __pw_d = np.array([], dtype=np.uint16)
     __pw_a = np.array([0], dtype=np.uint16)
     __pw_x = np.array([0], dtype=np.uint16)
+    __pw_a64 = np.array([0], dtype=np.int64)
     for __c_o, (__c_m, __c_n) in tqdm(
         itertools.product([__pw_o32, __pw_o64], [(0, None), (0, -1), (0, 1), (None, None), (None, -1), (None, 1), (-1, None), (-2, -1)]),
         total=16,
@@ -658,19 +674,191 @@ class Pinyin(ColProtoABC[list[int]]):
     ):
         __p_check(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x)
 
-    def query(
-        self,
+    @staticmethod
+    @numba.njit(parallel=True, cache=NUMBA_FILE_CACHE)
+    def __p_check_re(offsets, data16, m: int | None, n: int | None, and16, xand16, rmin, rmax):
+        # 与__p_check的区间语义一致，但允许每个音节重复rmin~rmax次（拼音正则量词）
+        nstring = len(offsets) - 1
+        k = len(and16)
+        result = np.zeros(nstring, dtype=np.bool_)
+        # __p_check对“负起点+非负终点”抛IndexError，正则路径同样在规范化前拒绝，
+        # 否则规范化后可能得到空区间而被当成匹配。
+        if m is not None and m < 0 and n is not None and n >= 0:
+            raise IndexError
+        # 与__p_check一致：同号区间若n<m则宽度为负，任何词长都不可能匹配，属非法区间
+        if m is not None and n is not None and n < m and (m < 0) == (n < 0):
+            raise ValueError
+        for i in numba.prange(nstring):
+            lo = offsets[i]
+            length = offsets[i + 1] - lo
+
+            if m is None:
+                start = 0
+            elif m >= 0:
+                start = m
+            else:
+                start = length + m
+            if n is None:
+                end = length
+            elif n >= 0:
+                end = n
+            else:
+                end = length + n
+
+            if start < 0 or end > length or start > end:
+                continue
+
+            rlen = end - start
+            dp = np.zeros(rlen + 1, dtype=np.bool_)
+            match = np.zeros(rlen, dtype=np.bool_)
+            run_end = np.zeros(rlen + 1, dtype=np.int64)
+            diff = np.zeros(rlen + 2, dtype=np.int32)
+            dp[0] = True
+
+            for t in range(k):
+                # 先算出每个位置起最长的连续匹配段；从位置p出发能到达的是
+                # [p, p+min(rmax, run_end[p]-p)] 这一整段（rmin>0时从p+rmin开始）。
+                # 用差分数组一次性合并所有可达区间，避免从每个可达位置反复扫描
+                # 剩余序列（连续%会退化成O(n^2)）。
+                for q in range(rlen):
+                    match[q] = (data16[lo + start + q] & and16[t]) == xand16[t]
+                run_end[rlen] = rlen
+                for q in range(rlen - 1, -1, -1):
+                    run_end[q] = run_end[q + 1] if match[q] else q
+
+                for q in range(rlen + 2):
+                    diff[q] = 0
+                for p in range(rlen + 1):
+                    if not dp[p]:
+                        continue
+                    maxc = run_end[p] - p
+                    if rmax[t] < maxc:
+                        maxc = rmax[t]
+                    if rmin[t] == 0:
+                        # 可以一个都不消费
+                        diff[p] += 1
+                        diff[p + maxc + 1] -= 1
+                    elif maxc >= rmin[t]:
+                        diff[p + rmin[t]] += 1
+                        diff[p + maxc + 1] -= 1
+
+                acc = 0
+                for p in range(rlen + 1):
+                    acc += diff[p]
+                    dp[p] = acc > 0
+
+            result[i] = dp[rlen]
+        return result
+
+    @staticmethod
+    @numba.njit(parallel=True, cache=NUMBA_FILE_CACHE)
+    def __p_check_nfa(
+        offsets,
+        data16,
         m: int | None,
         n: int | None,
+        and16,
+        xand16,
+        eps_off,
+        eps_to,
+        tok_off,
+        tok_to,
+        tok_mask,
+        start,
+        accept,
+    ):
+        # 与__p_check/__p_check_re的区间语义一致，但用NFA表示括号组的整体重复：
+        # 每个目标音节消费一条token边，ε边处理选择、可选项和星号。
+        if m is not None and m < 0 and n is not None and n >= 0:
+            raise IndexError
+        # 与__p_check/__p_check_re一致：同号区间若n<m则宽度为负，属非法区间
+        if m is not None and n is not None and n < m and (m < 0) == (n < 0):
+            raise ValueError
+        nstring = len(offsets) - 1
+        nstate = len(eps_off) - 1
+        result = np.zeros(nstring, dtype=np.bool_)
+        for i in numba.prange(nstring):
+            lo = offsets[i]
+            length = offsets[i + 1] - lo
+
+            if m is None:
+                pos = 0
+            elif m >= 0:
+                pos = m
+            else:
+                pos = length + m
+            if n is None:
+                end = length
+            elif n >= 0:
+                end = n
+            else:
+                end = length + n
+
+            if pos < 0 or end > length or pos > end:
+                continue
+
+            cur = np.zeros(nstate, dtype=np.bool_)
+            nxt = np.zeros(nstate, dtype=np.bool_)
+            stack = np.zeros(nstate, dtype=np.int64)
+            cur[start] = True
+            stack[0] = start
+            _nfa_close(cur, stack, 1, eps_off, eps_to)
+
+            for q in range(end - pos):
+                for s in range(nstate):
+                    nxt[s] = False
+                top = 0
+                sym = data16[lo + pos + q]
+                for s in range(nstate):
+                    if not cur[s]:
+                        continue
+                    for ti in range(tok_off[s], tok_off[s + 1]):
+                        t = tok_mask[ti]
+                        if (sym & and16[t]) == xand16[t]:
+                            d = tok_to[ti]
+                            if not nxt[d]:
+                                nxt[d] = True
+                                stack[top] = d
+                                top += 1
+                _nfa_close(nxt, stack, top, eps_off, eps_to)
+                for s in range(nstate):
+                    cur[s] = nxt[s]
+
+            result[i] = cur[accept]
+        return result
+
+    # 与__p_check一样在导入时预热，避免首个量词查询在查询路径里同步触发编译。
+    # m/n只有None和int两种类型，两种偏移类型 × 四种组合即可覆盖全部签名。
+    for __c_o, (__c_m, __c_n) in tqdm(
+        itertools.product([__pw_o32, __pw_o64], [(0, None), (0, -1), (None, None), (None, -1)]),
+        total=8,
+        desc="PinYin Regex NumBa JIT...",
+        disable=logger.level > logging.INFO,
+    ):
+        __p_check_re(__c_o, __pw_d, __c_m, __c_n, __pw_a, __pw_x, __pw_a64, __pw_a64)
+        __p_check_nfa(
+            __c_o,
+            __pw_d,
+            __c_m,
+            __c_n,
+            __pw_a,
+            __pw_x,
+            __pw_a64,
+            __pw_a64,
+            __pw_a64,
+            __pw_a64,
+            __pw_a64,
+            0,
+            0,
+        )
+
+    def _build_masks(
+        self,
         iw: Iterable[bool] | bool,
         fw: Iterable[bool] | bool,
         tw: Iterable[bool] | bool,
         s: Iterable[Syllable],
-    ) -> ArrayLike:
-        logger.info(f"CPinyin query m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
-        offset: ArrayLike = self.data.layout.offsets.data
-        data: ArrayLike = self.data.layout.content.data
-
+    ) -> tuple[np.ndarray, np.ndarray]:
         and_lst: list[np.uint16] = []
         xor_lst: list[np.uint16] = []
 
@@ -692,12 +880,76 @@ class Pinyin(ColProtoABC[list[int]]):
             and_lst.append(np.uint16(and_val))
             xor_lst.append(np.uint16(xor_val))
 
-        logger.info(f"CPinyin query and={and_lst!r} xor={xor_lst!r}")
-
         and_np = np.array(and_lst, dtype=np.uint16)
         xand_np = np.array(xor_lst, dtype=np.uint16) & and_np
 
+        logger.info(f"CPinyin query and={and_lst!r} xor={xor_lst!r}")
+        return and_np, xand_np
+
+    def query(
+        self,
+        m: int | None,
+        n: int | None,
+        iw: Iterable[bool] | bool,
+        fw: Iterable[bool] | bool,
+        tw: Iterable[bool] | bool,
+        s: Iterable[Syllable],
+    ) -> ArrayLike:
+        logger.info(f"CPinyin query m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}")
+        offset: ArrayLike = self.data.layout.offsets.data
+        data: ArrayLike = self.data.layout.content.data
+
+        and_np, xand_np = self._build_masks(iw, fw, tw, s)
+
         return asArrayLike(self.__p_check(offset, data, m, n, and_np, xand_np))
+
+    def query_re(
+        self,
+        m: int | None,
+        n: int | None,
+        iw: Iterable[bool] | bool,
+        fw: Iterable[bool] | bool,
+        tw: Iterable[bool] | bool,
+        s: Iterable[Syllable],
+        reps: Iterable[tuple[int, int | None]],
+    ) -> ArrayLike:
+        logger.info(f"CPinyin query_re m={m!r}, n={n!r}, iw={iw!r}, fw={fw!r}, tw={tw!r}, s={s!r}, reps={reps!r}")
+        offset: ArrayLike = self.data.layout.offsets.data
+        data: ArrayLike = self.data.layout.content.data
+        reps = list(reps)
+
+        and_np, xand_np = self._build_masks(iw, fw, tw, s)
+        if len(reps) != len(and_np):
+            raise ValueError(f"reps与音节数量不一致: {len(reps)} != {len(and_np)}")
+        i64max = np.iinfo(np.int64).max
+        # 计数超过int64上限时截断：词长不可能达到，语义不变；直接np.int64(...)会溢出
+        rmin = np.array([min(lo, i64max) for lo, _ in reps], dtype=np.int64)
+        rmax = np.array([i64max if hi is None else min(hi, i64max) for _, hi in reps], dtype=np.int64)
+
+        return asArrayLike(self.__p_check_re(offset, data, m, n, and_np, xand_np, rmin, rmax))
+
+    def query_re_nfa(
+        self,
+        m: int | None,
+        n: int | None,
+        and16: np.ndarray,
+        xand16: np.ndarray,
+        eps_off: np.ndarray,
+        eps_to: np.ndarray,
+        tok_off: np.ndarray,
+        tok_to: np.ndarray,
+        tok_mask: np.ndarray,
+        start: int,
+        accept: int,
+    ) -> ArrayLike:
+        logger.info(f"CPinyin query_re_nfa m={m!r}, n={n!r}, nstate={len(eps_off) - 1}")
+        offset: ArrayLike = self.data.layout.offsets.data
+        data: ArrayLike = self.data.layout.content.data
+        return asArrayLike(
+            self.__p_check_nfa(
+                offset, data, m, n, and16, xand16, eps_off, eps_to, tok_off, tok_to, tok_mask, start, accept
+            )
+        )
 
 
 class _Enum(_Int):
