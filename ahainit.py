@@ -20,7 +20,7 @@ from core.dispatcher import (  # type: ignore
     on_notice,
 )
 from models import api  # type: ignore
-from models.msg import Forward, MessageChain, MsgChain, Node, Text  # type: ignore
+from models.msg import Forward, MessageChain, MsgChain, MsgSeg, Node, Text  # type: ignore
 from thefuzz import process
 from utils.string import InlineStr  # type: ignore
 
@@ -32,7 +32,7 @@ logger = logging.getLogger("tianzi")
 
 last_sent: deque[tuple[str, str]] = deque(maxlen=3)
 
-group_last_command: dict[str, str] = {}
+group_last_command: dict[str, list[str | MsgSeg]] = {}
 
 OTHER_BOT_QQ = {
     "1994709738": 1,
@@ -146,7 +146,9 @@ async def tianzi(event: api.Message):
     if ret_msg:
         mid = await event.send(ret_msg.to_list())
         last_sent.append((str(event.message_id), mid))
-        group_last_command[str(event.group_id)] = raw
+        # InlineStr 的字符→消息段映射存在 ContextVar 中，只在当前事件上下文有效。
+        # 这里先还原成消息段列表保存，重放时再在新上下文中重新编码。
+        group_last_command[str(event.group_id)] = InlineStr(raw).to_list()
         if ret_msg.startswith("不发 填字") and ret_msg != "不发 填字 自己吓自己~" and ret_msg != "不发 填字 自己吓自己～":
             await event.send("自己吓自己~")
 
@@ -166,8 +168,10 @@ async def tianzi_repeat(event: api.Message):
         await event.send("填字同上指定变量格式错误：应当使用每行一个的「变量名=值」格式。")
         return
     if str(event.group_id) in group_last_command:
-        ret_msg = await tianzi_core(
-            group_last_command[str(event.group_id)], variants, initial_inner_vars={"QQAPI": {"uid": uid, "gid": gid or ""}}
+        # 原命令中的内联消息段在当前上下文里重新编码，才能被 to_list 还原。
+        raw = str(InlineStr.from_iterable(group_last_command[str(event.group_id)]))
+        ret_msg = InlineStr(
+            await tianzi_core(raw, variants, initial_inner_vars={"QQAPI": {"uid": uid, "gid": gid or ""}})
         )
 
         if fusemsg := fused(event, ret_msg):
@@ -181,7 +185,7 @@ async def tianzi_repeat(event: api.Message):
             await event.send("发 我叫 薨机")
             return
         if ret_msg:
-            mid = await event.send(ret_msg)
+            mid = await event.send(ret_msg.to_list())
             last_sent.append((str(event.message_id), mid))
 
 
